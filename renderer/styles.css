@@ -530,6 +530,37 @@ button {
   text-decoration: line-through;
 }
 
+/* Codex chip variant: muted teal, mirrors the claude chip layout so all
+   sizing, hover, close-button and exited rules stay in sync. */
+.folder-terminal-tab-chip[data-agent="codex"] {
+  border-color: #2e6f80;
+  background: linear-gradient(180deg, #3a8294, #1c5564);
+  color: #e6f6fb;
+}
+
+.folder-terminal-tab-chip[data-agent="codex"]:hover:not(.is-active) {
+  background: linear-gradient(180deg, #4a98ac, #226778);
+  color: #ffffff;
+}
+
+.folder-terminal-tab-chip[data-agent="codex"].is-active {
+  border-color: #4ec2db;
+  background: linear-gradient(180deg, #6ddaee, #2ea6c0);
+  color: #06222a;
+}
+
+.folder-terminal-tab-chip[data-agent="codex"].is-exited {
+  background: linear-gradient(180deg, #336573, #1a3e48);
+}
+
+.folder-terminal-tab-chip[data-agent="codex"].is-exited.is-active {
+  background: linear-gradient(180deg, #4d8b9b, #2a5e6c);
+}
+
+.folder-terminal-tab-chip[data-agent="codex"].is-exited:hover:not(.is-active) {
+  background: linear-gradient(180deg, #336573, #1a3e48);
+}
+
 /* + button: rounded square at the right side of the strip, sits with
    the inactive chips so it doesn't overlap session controls. */
 .folder-terminal-tab-add {
