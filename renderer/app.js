@@ -559,7 +559,7 @@
 
     closeBtn.addEventListener('click', (event) => {
       event.stopPropagation();
-      // Wired in step 6.
+      closeTab(tab);
     });
 
     chip.addEventListener('contextmenu', (event) => {
@@ -656,6 +656,45 @@
     return target;
   }
 
+  async function closeTab(tab) {
+    if (!tab) return;
+    const sessionWindow = tab.sessionWindow;
+    if (!sessionWindow) return;
+
+    // If this is the last tab, closing it closes the whole window.
+    if (sessionWindow.tabs.length <= 1) {
+      await closeSessionWindow(sessionWindow, { animate: true });
+      return;
+    }
+
+    const label = getTabLabel(tab);
+    const index = sessionWindow.tabs.indexOf(tab);
+    const wasActive = sessionWindow.activeTabId === tab.id;
+
+    // Pick the neighbor to activate if we are closing the active tab:
+    // prefer the right neighbor, else the left.
+    let neighbor = null;
+    if (wasActive) {
+      neighbor = sessionWindow.tabs[index + 1] || sessionWindow.tabs[index - 1] || null;
+    }
+
+    try { await api.closeTerminal(tab.id); } catch {}
+    try { tab.term.dispose(); } catch {}
+
+    if (tab.tabChipEl && tab.tabChipEl.parentNode) tab.tabChipEl.parentNode.removeChild(tab.tabChipEl);
+    if (tab.terminalEl && tab.terminalEl.parentNode) tab.terminalEl.parentNode.removeChild(tab.terminalEl);
+
+    if (index >= 0) sessionWindow.tabs.splice(index, 1);
+    state.tabsById.delete(tab.id);
+
+    if (wasActive) {
+      sessionWindow.activeTabId = null;
+      if (neighbor) activateTab(sessionWindow, neighbor.id, { focus: true });
+    }
+
+    addNarrationEvent(sessionWindow.folderPath, 'tab-closed', `Closed tab ${label} in ${basename(sessionWindow.folderPath)}.`);
+  }
+
   async function createTab(sessionWindow) {
     if (!sessionWindow) return null;
 
@@ -730,7 +769,10 @@
     if (tab) fitAfterStableLayout(tab, { focus: true, waitForAnimation: true });
   }
 
-  async function closeSessionWindow(sessionWindow) {
+  async function closeSessionWindow(sessionWindow, options) {
+    // The animate option is honored in step 7. For step 6 it is accepted but
+    // not yet used, so callers can be written against the final API.
+    void options;
     if (sessionWindow.resizeObserver) sessionWindow.resizeObserver.disconnect();
     if (sessionWindow.resizeTimer) clearTimeout(sessionWindow.resizeTimer);
     for (const tab of sessionWindow.tabs.slice()) {
