@@ -35,12 +35,21 @@ function quotePowerShellLiteral(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
 
-function buildShellArgs(shell, cwd) {
+const AGENT_COMMANDS = {
+  claude: 'claude --dangerously-skip-permissions',
+  codex: 'codex --yolo',
+};
+
+function resolveAgentCommand(agent) {
+  return AGENT_COMMANDS[agent] || AGENT_COMMANDS.claude;
+}
+
+function buildShellArgs(shell, cwd, agent) {
   if (!isPowerShell(shell)) return [];
   const script = [
     PWSH_PROMPT_WRAPPER,
     `Set-Location -LiteralPath ${quotePowerShellLiteral(cwd)}`,
-    'claude --dangerously-skip-permissions',
+    resolveAgentCommand(agent),
   ].join('\n');
   const encoded = Buffer.from(script, 'utf16le').toString('base64');
   return ['-NoExit', '-EncodedCommand', encoded];
@@ -145,10 +154,11 @@ function registerIpc(mainWindow) {
       return { success: false, error: error.message };
     }
 
+    const agent = (payload && payload.agent === 'codex') ? 'codex' : 'claude';
     const shell = detectShell();
     const cols = Math.max(20, Math.min(300, Number(payload.cols) || 100));
     const rows = Math.max(8, Math.min(120, Number(payload.rows) || 30));
-    const args = buildShellArgs(shell, cwd);
+    const args = buildShellArgs(shell, cwd, agent);
     const env = { ...process.env };
 
     const terminalProcess = pty.spawn(shell, args, {
@@ -160,9 +170,10 @@ function registerIpc(mainWindow) {
     });
 
     if (!isPowerShell(shell)) {
+      const command = resolveAgentCommand(agent);
       setTimeout(() => {
         try {
-          terminalProcess.write('claude --dangerously-skip-permissions\r\n');
+          terminalProcess.write(`${command}\r\n`);
         } catch {}
       }, 500);
     }
