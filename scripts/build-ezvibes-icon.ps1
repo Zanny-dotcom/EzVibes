@@ -90,6 +90,7 @@ function New-EzvibesBitmap {
   $sf = New-Object System.Drawing.StringFormat
   $sf.Alignment = [System.Drawing.StringAlignment]::Center
   $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
+  # PS 5.1 overload pick: passing Rectangle resolves to DrawString(..., PointF, ...); force RectangleF for the layout-rectangle overload.
   $faceRectF = [System.Drawing.RectangleF]::new($faceRect.X, $faceRect.Y, $faceRect.Width, $faceRect.Height)
   $g.DrawString('Z', $font, $textBrush, $faceRectF, $sf)
   $font.Dispose()
