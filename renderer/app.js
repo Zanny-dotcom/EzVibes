@@ -338,7 +338,7 @@
           if (sessionWindow.minimized) restoreSessionWindow(sessionWindow, sourceCard);
           else minimizeSessionWindow(sessionWindow, sourceCard);
         });
-        addMenuItem('Close Session', () => closeSessionWindow(sessionWindow));
+        addMenuItem('Close Session', () => closeSessionWindow(sessionWindow, { animate: true }));
       }
     } else {
       addMenuItem('No folder actions', null, true);
@@ -498,7 +498,7 @@
     attachTabChip(sessionWindow, firstTab, { active: true });
 
     windowEl.querySelector('.minimize').addEventListener('click', () => minimizeSessionWindow(sessionWindow, findCard(folderPath)));
-    windowEl.querySelector('.close').addEventListener('click', () => closeSessionWindow(sessionWindow));
+    windowEl.querySelector('.close').addEventListener('click', () => closeSessionWindow(sessionWindow, { animate: true }));
 
     addTabBtnEl.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -770,20 +770,58 @@
   }
 
   async function closeSessionWindow(sessionWindow, options) {
-    // The animate option is honored in step 7. For step 6 it is accepted but
-    // not yet used, so callers can be written against the final API.
-    void options;
-    if (sessionWindow.resizeObserver) sessionWindow.resizeObserver.disconnect();
-    if (sessionWindow.resizeTimer) clearTimeout(sessionWindow.resizeTimer);
-    for (const tab of sessionWindow.tabs.slice()) {
+    const opts = options || {};
+
+    if (sessionWindow.resizeObserver) {
+      sessionWindow.resizeObserver.disconnect();
+      sessionWindow.resizeObserver = null;
+    }
+    if (sessionWindow.resizeTimer) {
+      clearTimeout(sessionWindow.resizeTimer);
+      sessionWindow.resizeTimer = null;
+    }
+
+    // Kill or close every tab PTY and dispose every xterm.
+    const tabs = sessionWindow.tabs.slice();
+    for (const tab of tabs) {
       try { await api.closeTerminal(tab.id); } catch {}
       try { tab.term.dispose(); } catch {}
       state.tabsById.delete(tab.id);
     }
     sessionWindow.tabs.length = 0;
-    sessionWindow.windowEl.remove();
+    sessionWindow.activeTabId = null;
+
+    // Drop the window from the path map immediately so the folder card stops
+    // rendering as session-open/minimized while the animation plays.
     state.windowsByPath.delete(sessionWindow.folderPath);
     renderGrid();
+
+    const removeWindow = () => {
+      if (sessionWindow.windowEl && sessionWindow.windowEl.parentNode) {
+        sessionWindow.windowEl.remove();
+      }
+    };
+
+    if (opts.animate && !sessionWindow.windowEl.hidden) {
+      const card = findCard(sessionWindow.folderPath);
+      setAnimationTarget(sessionWindow.windowEl, card, '--to-x', '--to-y');
+      sessionWindow.windowEl.classList.remove('opening');
+      sessionWindow.windowEl.classList.add('minimizing');
+      await new Promise((resolve) => {
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          sessionWindow.windowEl.removeEventListener('animationend', finish);
+          resolve();
+        };
+        const timer = setTimeout(finish, 500);
+        sessionWindow.windowEl.addEventListener('animationend', finish);
+      });
+    }
+
+    removeWindow();
   }
 
   function animateOpen(sessionWindow, sourceCard) {
