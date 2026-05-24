@@ -7,7 +7,7 @@
     history: [],
     query: '',
     windowsByPath: new Map(),
-    sessionsById: new Map(),
+    tabsById: new Map(),
     narrationByPath: new Map(),
     narrationOpen: false,
     previewPath: '',
@@ -82,7 +82,10 @@
       if (event.key === 'Escape') hideContextMenu();
     });
     window.addEventListener('resize', () => {
-      for (const session of state.sessionsById.values()) scheduleStableFit(session);
+      for (const sessionWindow of state.windowsByPath.values()) {
+        const tab = getActiveTab(sessionWindow);
+        if (tab) scheduleStableFit(tab);
+      }
     });
 
     window.addEventListener('keydown', async (event) => {
@@ -206,23 +209,23 @@
 
   function bindTerminalEvents() {
     api.onTerminalData(({ sessionId, data }) => {
-      const session = state.sessionsById.get(sessionId);
-      if (!session) return;
-      session.term.write(data);
-      handleTerminalOutput(session, data);
+      const tab = state.tabsById.get(sessionId);
+      if (!tab) return;
+      tab.term.write(data);
+      handleTerminalOutput(tab, data);
     });
 
     api.onTerminalExit(({ sessionId, exitCode }) => {
-      const session = state.sessionsById.get(sessionId);
-      if (!session) return;
-      session.exited = true;
-      session.term.writeln(`\r\n\x1b[90m[Claude session exited with code ${exitCode}]\x1b[0m`);
-      session.windowEl.classList.add('session-exited');
-      const subtitle = session.windowEl.querySelector('.session-subtitle');
-      if (subtitle) subtitle.textContent = `Exited with code ${exitCode}`;
+      const tab = state.tabsById.get(sessionId);
+      if (!tab) return;
+      tab.ptyAlive = false;
+      tab.exited = true;
+      tab.term.writeln(`\r\n\x1b[90m[Claude session exited with code ${exitCode}]\x1b[0m`);
+      tab.sessionWindow.windowEl.classList.add('session-exited');
       const isError = exitCode !== 0;
-      addNarrationEvent(session.path, isError ? 'error' : 'completed', `Claude session exited with code ${exitCode}.`);
-      setNarrationSummary(session.path, isError ? 'error' : 'completed', isError ? `Exited with error code ${exitCode}.` : 'Session completed.');
+      const folderPath = tab.sessionWindow.folderPath;
+      addNarrationEvent(folderPath, isError ? 'error' : 'completed', `Claude session exited with code ${exitCode}.`);
+      setNarrationSummary(folderPath, isError ? 'error' : 'completed', isError ? `Exited with error code ${exitCode}.` : 'Session completed.');
     });
   }
 
@@ -278,9 +281,9 @@
       card.dataset.path = entry.path;
       card.title = entry.path;
 
-      const session = state.windowsByPath.get(entry.path);
-      if (session) {
-        if (session.minimized) card.classList.add('session-minimized');
+      const sessionWindow = state.windowsByPath.get(entry.path);
+      if (sessionWindow) {
+        if (sessionWindow.minimized) card.classList.add('session-minimized');
         else card.classList.add('session-open');
       }
       if (state.previewPath && entry.path === state.previewPath) {
@@ -329,13 +332,13 @@
     if (entry.kind === 'directory') {
       addMenuItem('Open Folder', () => navigateTo(entry.path));
       addMenuItem('Launch Claude', () => launchClaudeForPath(entry.path, sourceCard));
-      const session = state.windowsByPath.get(entry.path);
-      if (session) {
-        addMenuItem(session.minimized ? 'Restore Session' : 'Minimize Session', () => {
-          if (session.minimized) restoreSessionWindow(session, sourceCard);
-          else minimizeSessionWindow(session, sourceCard);
+      const sessionWindow = state.windowsByPath.get(entry.path);
+      if (sessionWindow) {
+        addMenuItem(sessionWindow.minimized ? 'Restore Session' : 'Minimize Session', () => {
+          if (sessionWindow.minimized) restoreSessionWindow(sessionWindow, sourceCard);
+          else minimizeSessionWindow(sessionWindow, sourceCard);
         });
-        addMenuItem('Close Session', () => closeSessionWindow(session));
+        addMenuItem('Close Session', () => closeSessionWindow(sessionWindow));
       }
     } else {
       addMenuItem('No folder actions', null, true);
@@ -375,37 +378,77 @@
       return;
     }
 
-    const session = createSessionWindow(folderPath);
-    state.windowsByPath.set(folderPath, session);
-    state.sessionsById.set(session.id, session);
+    const sessionWindow = createSessionWindow(folderPath);
+    state.windowsByPath.set(folderPath, sessionWindow);
     addNarrationEvent(folderPath, 'session-started', `Claude launched in ${basename(folderPath)}.`);
     setNarrationSummary(folderPath, 'active', 'Claude session started.');
     renderGrid();
 
-    animateOpen(session, sourceCard || findCard(folderPath));
-    session.term.open(session.terminalEl);
-    session.term.onData((data) => handleTerminalInput(session, data));
-    await fitAfterStableLayout(session, { focus: true, waitForAnimation: true });
-    observeSessionSize(session);
+    const tab = getActiveTab(sessionWindow);
+    animateOpen(sessionWindow, sourceCard || findCard(folderPath));
+    tab.term.open(tab.terminalEl);
+    tab.term.onData((data) => handleTerminalInput(tab, data));
+    await fitAfterStableLayout(tab, { focus: true, waitForAnimation: true });
+    observeSessionSize(sessionWindow);
 
     const result = await api.createTerminal({
-      sessionId: session.id,
+      sessionId: tab.id,
       cwd: folderPath,
-      cols: session.term.cols,
-      rows: session.term.rows,
+      cols: tab.term.cols,
+      rows: tab.term.rows,
     });
 
     if (!result || !result.success) {
-      session.term.writeln(`\r\n\x1b[31m${result ? result.error : 'Failed to launch Claude.'}\x1b[0m`);
+      tab.ptyAlive = false;
+      tab.term.writeln(`\r\n\x1b[31m${result ? result.error : 'Failed to launch Claude.'}\x1b[0m`);
     }
+  }
+
+  const XTERM_THEME = {
+    background: '#060606',
+    foreground: '#f6f1d5',
+    cursor: '#ffb300',
+    selectionBackground: '#50431f',
+    black: '#0c0c0c',
+    red: '#ff5f57',
+    green: '#5af78e',
+    yellow: '#f3f99d',
+    blue: '#57c7ff',
+    magenta: '#ff6ac1',
+    cyan: '#9aedfe',
+    white: '#f1f1f0',
+    brightBlack: '#686868',
+    brightRed: '#ff5f57',
+    brightGreen: '#5af78e',
+    brightYellow: '#f3f99d',
+    brightBlue: '#57c7ff',
+    brightMagenta: '#ff6ac1',
+    brightCyan: '#9aedfe',
+    brightWhite: '#ffffff',
+  };
+
+  function makeId() {
+    return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+  }
+
+  function getActiveTab(sessionWindow) {
+    if (!sessionWindow) return null;
+    const id = sessionWindow.activeTabId;
+    if (!id) return sessionWindow.tabs[0] || null;
+    return sessionWindow.tabs.find((t) => t.id === id) || sessionWindow.tabs[0] || null;
+  }
+
+  function getTabLabel(tab) {
+    if (!tab) return '';
+    return tab.customName || String(tab.numericLabel);
   }
 
   function createSessionWindow(folderPath) {
     const name = basename(folderPath);
-    const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    const windowId = makeId();
     const windowEl = document.createElement('section');
     windowEl.className = 'folder-terminal';
-    windowEl.dataset.sessionId = id;
+    windowEl.dataset.windowId = windowId;
     windowEl.innerHTML = `
       <div class="folder-terminal-nubbin" title="Right-click to rename">
         <span class="nubbin-text"></span>
@@ -423,115 +466,142 @@
 
     const nubbinEl = windowEl.querySelector('.folder-terminal-nubbin');
     nubbinEl.querySelector('.nubbin-text').textContent = name;
+    const terminalPocketEl = windowEl.querySelector('.terminal-pocket');
     const terminalEl = windowEl.querySelector('.terminal-host');
     els.sessionLayer.appendChild(windowEl);
+
+    const sessionWindow = {
+      id: windowId,
+      folderPath,
+      folderName: name,
+      windowEl,
+      tabStripEl: null,
+      addTabBtnEl: null,
+      terminalPocketEl,
+      nubbinEl,
+      tabs: [],
+      activeTabId: null,
+      minimized: false,
+      nextTabNumber: 1,
+      resizeObserver: null,
+      resizeTimer: null,
+    };
+
+    // Build the first tab.
+    const firstTab = buildTab(sessionWindow, terminalEl);
+    sessionWindow.tabs.push(firstTab);
+    sessionWindow.activeTabId = firstTab.id;
+    state.tabsById.set(firstTab.id, firstTab);
+
+    // For backward compatibility during the tab refactor, the .folder-terminal
+    // section still exposes the active tab id via data-session-id so any code
+    // still using findSessionForElement keeps working until step 8.
+    windowEl.dataset.sessionId = firstTab.id;
+
+    windowEl.querySelector('.minimize').addEventListener('click', () => minimizeSessionWindow(sessionWindow, findCard(folderPath)));
+    windowEl.querySelector('.close').addEventListener('click', () => closeSessionWindow(sessionWindow));
+
+    terminalEl.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const tab = findTabForTerminalHost(terminalEl) || firstTab;
+      showTerminalContextMenu(tab, event.clientX, event.clientY);
+    });
+
+    nubbinEl.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showNubbinContextMenu(firstTab, event.clientX, event.clientY);
+    });
+
+    return sessionWindow;
+  }
+
+  function buildTab(sessionWindow, terminalEl) {
+    const id = makeId();
+    terminalEl.dataset.tabId = id;
 
     const term = new Terminal({
       cursorBlink: true,
       fontFamily: 'Cascadia Mono, Consolas, "Courier New", monospace',
       fontSize: 13,
       lineHeight: 1.15,
-      theme: {
-        background: '#060606',
-        foreground: '#f6f1d5',
-        cursor: '#ffb300',
-        selectionBackground: '#50431f',
-        black: '#0c0c0c',
-        red: '#ff5f57',
-        green: '#5af78e',
-        yellow: '#f3f99d',
-        blue: '#57c7ff',
-        magenta: '#ff6ac1',
-        cyan: '#9aedfe',
-        white: '#f1f1f0',
-        brightBlack: '#686868',
-        brightRed: '#ff5f57',
-        brightGreen: '#5af78e',
-        brightYellow: '#f3f99d',
-        brightBlue: '#57c7ff',
-        brightMagenta: '#ff6ac1',
-        brightCyan: '#9aedfe',
-        brightWhite: '#ffffff',
-      },
+      theme: XTERM_THEME,
     });
-
     const fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
 
-    const session = {
+    const tab = {
       id,
-      path: folderPath,
-      name,
-      windowEl,
-      terminalEl,
-      nubbinEl,
+      sessionWindow,
+      numericLabel: sessionWindow.nextTabNumber++,
+      customName: null,
+      ptyAlive: true,
+      exited: false,
+      inputBuffer: '',
       term,
       fitAddon,
-      resizeObserver: null,
-      resizeTimer: null,
-      minimized: false,
-      exited: false,
+      terminalEl,
+      tabChipEl: null,
+      tabLabelEl: null,
+      closeBtnEl: null,
     };
 
-    windowEl.querySelector('.minimize').addEventListener('click', () => minimizeSessionWindow(session, findCard(folderPath)));
-    windowEl.querySelector('.close').addEventListener('click', () => closeSessionWindow(session));
-
-    terminalEl.addEventListener('contextmenu', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      showTerminalContextMenu(session, event.clientX, event.clientY);
-    });
-
-    nubbinEl.addEventListener('contextmenu', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      showNubbinContextMenu(session, event.clientX, event.clientY);
-    });
-
-    return session;
+    return tab;
   }
 
-  function minimizeSessionWindow(session, sourceCard) {
-    if (session.minimized) return;
-    const card = sourceCard || findCard(session.path);
-    setAnimationTarget(session.windowEl, card, '--to-x', '--to-y');
-    session.windowEl.classList.remove('opening');
-    session.windowEl.classList.add('minimizing');
-    session.windowEl.addEventListener('animationend', function handleEnd() {
-      session.windowEl.removeEventListener('animationend', handleEnd);
-      session.windowEl.classList.remove('minimizing');
-      session.windowEl.hidden = true;
-      session.minimized = true;
+  function findTabForTerminalHost(hostEl) {
+    if (!hostEl) return null;
+    const id = hostEl.dataset && hostEl.dataset.tabId;
+    if (!id) return null;
+    return state.tabsById.get(id) || null;
+  }
+
+  function minimizeSessionWindow(sessionWindow, sourceCard) {
+    if (sessionWindow.minimized) return;
+    const card = sourceCard || findCard(sessionWindow.folderPath);
+    setAnimationTarget(sessionWindow.windowEl, card, '--to-x', '--to-y');
+    sessionWindow.windowEl.classList.remove('opening');
+    sessionWindow.windowEl.classList.add('minimizing');
+    sessionWindow.windowEl.addEventListener('animationend', function handleEnd() {
+      sessionWindow.windowEl.removeEventListener('animationend', handleEnd);
+      sessionWindow.windowEl.classList.remove('minimizing');
+      sessionWindow.windowEl.hidden = true;
+      sessionWindow.minimized = true;
       renderGrid();
     });
   }
 
-  function restoreSessionWindow(session, sourceCard) {
-    session.windowEl.hidden = false;
-    session.minimized = false;
-    animateOpen(session, sourceCard || findCard(session.path));
+  function restoreSessionWindow(sessionWindow, sourceCard) {
+    sessionWindow.windowEl.hidden = false;
+    sessionWindow.minimized = false;
+    animateOpen(sessionWindow, sourceCard || findCard(sessionWindow.folderPath));
     renderGrid();
-    fitAfterStableLayout(session, { focus: true, waitForAnimation: true });
+    const tab = getActiveTab(sessionWindow);
+    if (tab) fitAfterStableLayout(tab, { focus: true, waitForAnimation: true });
   }
 
-  async function closeSessionWindow(session) {
-    await api.closeTerminal(session.id);
-    if (session.resizeObserver) session.resizeObserver.disconnect();
-    if (session.resizeTimer) clearTimeout(session.resizeTimer);
-    session.term.dispose();
-    session.windowEl.remove();
-    state.sessionsById.delete(session.id);
-    state.windowsByPath.delete(session.path);
+  async function closeSessionWindow(sessionWindow) {
+    if (sessionWindow.resizeObserver) sessionWindow.resizeObserver.disconnect();
+    if (sessionWindow.resizeTimer) clearTimeout(sessionWindow.resizeTimer);
+    for (const tab of sessionWindow.tabs.slice()) {
+      try { await api.closeTerminal(tab.id); } catch {}
+      try { tab.term.dispose(); } catch {}
+      state.tabsById.delete(tab.id);
+    }
+    sessionWindow.tabs.length = 0;
+    sessionWindow.windowEl.remove();
+    state.windowsByPath.delete(sessionWindow.folderPath);
     renderGrid();
   }
 
-  function animateOpen(session, sourceCard) {
-    setAnimationTarget(session.windowEl, sourceCard, '--from-x', '--from-y');
-    session.windowEl.classList.remove('minimizing');
-    session.windowEl.classList.add('opening');
-    session.windowEl.addEventListener('animationend', function handleEnd() {
-      session.windowEl.removeEventListener('animationend', handleEnd);
-      session.windowEl.classList.remove('opening');
+  function animateOpen(sessionWindow, sourceCard) {
+    setAnimationTarget(sessionWindow.windowEl, sourceCard, '--from-x', '--from-y');
+    sessionWindow.windowEl.classList.remove('minimizing');
+    sessionWindow.windowEl.classList.add('opening');
+    sessionWindow.windowEl.addEventListener('animationend', function handleEnd() {
+      sessionWindow.windowEl.removeEventListener('animationend', handleEnd);
+      sessionWindow.windowEl.classList.remove('opening');
     });
   }
 
@@ -546,55 +616,61 @@
     element.style.setProperty(yVar, `${targetY - ownY}px`);
   }
 
-  function observeSessionSize(session) {
-    if (session.resizeObserver || typeof ResizeObserver !== 'function') return;
-    session.resizeObserver = new ResizeObserver(() => scheduleStableFit(session));
-    session.resizeObserver.observe(session.terminalEl);
+  function observeSessionSize(sessionWindow) {
+    if (sessionWindow.resizeObserver || typeof ResizeObserver !== 'function') return;
+    sessionWindow.resizeObserver = new ResizeObserver(() => {
+      const tab = getActiveTab(sessionWindow);
+      if (tab) scheduleStableFit(tab);
+    });
+    sessionWindow.resizeObserver.observe(sessionWindow.terminalPocketEl);
   }
 
-  function scheduleStableFit(session, options) {
-    if (session.resizeTimer) clearTimeout(session.resizeTimer);
-    session.resizeTimer = setTimeout(() => {
-      session.resizeTimer = null;
+  function scheduleStableFit(tab, options) {
+    const sessionWindow = tab.sessionWindow;
+    if (sessionWindow.resizeTimer) clearTimeout(sessionWindow.resizeTimer);
+    sessionWindow.resizeTimer = setTimeout(() => {
+      sessionWindow.resizeTimer = null;
       const opts = options || {};
-      fitAfterStableLayout(session, {
+      fitAfterStableLayout(tab, {
         ...opts,
-        waitForAnimation: opts.waitForAnimation || session.windowEl.classList.contains('opening'),
+        waitForAnimation: opts.waitForAnimation || sessionWindow.windowEl.classList.contains('opening'),
       });
     }, 80);
   }
 
-  async function fitAfterStableLayout(session, options) {
+  async function fitAfterStableLayout(tab, options) {
     const opts = options || {};
-    if (opts.waitForAnimation) await waitForOpeningAnimation(session);
+    if (opts.waitForAnimation) await waitForOpeningAnimation(tab.sessionWindow);
     await waitForFonts();
     await nextFrame();
     await nextFrame();
-    fitSession(session);
-    if (opts.focus) session.term.focus();
+    fitTab(tab);
+    if (opts.focus) tab.term.focus();
   }
 
-  function fitSession(session) {
-    if (session.minimized || session.windowEl.hidden) return;
+  function fitTab(tab) {
+    const sessionWindow = tab.sessionWindow;
+    if (sessionWindow.minimized || sessionWindow.windowEl.hidden) return;
+    if (tab.terminalEl && tab.terminalEl.hidden) return;
     try {
-      session.fitAddon.fit();
-      api.resizeTerminal(session.id, session.term.cols, session.term.rows);
+      tab.fitAddon.fit();
+      api.resizeTerminal(tab.id, tab.term.cols, tab.term.rows);
     } catch {}
   }
 
-  function waitForOpeningAnimation(session) {
-    if (!session.windowEl.classList.contains('opening')) return Promise.resolve();
+  function waitForOpeningAnimation(sessionWindow) {
+    if (!sessionWindow.windowEl.classList.contains('opening')) return Promise.resolve();
     return new Promise((resolve) => {
       let done = false;
       const finish = () => {
         if (done) return;
         done = true;
         clearTimeout(timer);
-        session.windowEl.removeEventListener('animationend', finish);
+        sessionWindow.windowEl.removeEventListener('animationend', finish);
         resolve();
       };
       const timer = setTimeout(finish, 500);
-      session.windowEl.addEventListener('animationend', finish);
+      sessionWindow.windowEl.addEventListener('animationend', finish);
     });
   }
 
@@ -639,7 +715,7 @@
     const sessionContainer = element.closest('.folder-terminal');
     if (!sessionContainer) return null;
     const sessionId = sessionContainer.dataset.sessionId;
-    return state.sessionsById.get(sessionId) || null;
+    return state.tabsById.get(sessionId) || null;
   }
 
   function insertTextIntoInput(input, text) {
@@ -675,10 +751,10 @@
     return `"${p}"`;
   }
 
-  function showNubbinContextMenu(session, x, y) {
+  function showNubbinContextMenu(tab, x, y) {
     hideContextMenu();
     els.contextMenu.innerHTML = '';
-    addMenuItem('Rename', () => startRename(session));
+    addMenuItem('Rename', () => startRename(tab));
     els.contextMenu.hidden = false;
     const rect = els.contextMenu.getBoundingClientRect();
     const left = Math.min(x, window.innerWidth - rect.width - 12);
@@ -687,10 +763,10 @@
     els.contextMenu.style.top = `${Math.max(12, top)}px`;
   }
 
-  function startRename(session) {
-    const nubbin = session.nubbinEl;
+  function startRename(tab) {
+    const nubbin = tab.sessionWindow.nubbinEl;
     if (!nubbin || nubbin.querySelector('.nubbin-input')) return;
-    const original = session.name;
+    const original = tab.customName || tab.sessionWindow.folderName;
     nubbin.innerHTML = '';
     const input = document.createElement('input');
     input.className = 'nubbin-input';
@@ -708,7 +784,7 @@
       settled = true;
       const trimmed = (rawValue || '').trim();
       const finalName = trimmed || original;
-      session.name = finalName;
+      tab.customName = finalName === tab.sessionWindow.folderName ? null : finalName;
       nubbin.innerHTML = '';
       const span = document.createElement('span');
       span.className = 'nubbin-text';
@@ -734,21 +810,21 @@
     input.addEventListener('mousedown', (event) => event.stopPropagation());
   }
 
-  function showTerminalContextMenu(session, x, y) {
+  function showTerminalContextMenu(tab, x, y) {
     hideContextMenu();
     els.contextMenu.innerHTML = '';
 
-    const selection = session.term.getSelection();
+    const selection = tab.term.getSelection();
     addMenuItem('Copy', () => {
-      const sel = session.term.getSelection();
+      const sel = tab.term.getSelection();
       if (sel) api.writeClipboard(sel);
     }, !selection);
     addMenuItem('Paste', async () => {
       const text = await api.readClipboard();
-      if (text) api.writeTerminal(session.id, text);
+      if (text) api.writeTerminal(tab.id, text);
     });
     addMenuItem('Select All', () => {
-      session.term.selectAll();
+      tab.term.selectAll();
     });
 
     els.contextMenu.hidden = false;
@@ -848,22 +924,23 @@
     return s.slice(0, max - 1) + '…';
   }
 
-  function handleTerminalInput(session, data) {
-    api.writeTerminal(session.id, data);
-    if (typeof session.inputBuffer !== 'string') session.inputBuffer = '';
+  function handleTerminalInput(tab, data) {
+    api.writeTerminal(tab.id, data);
+    if (typeof tab.inputBuffer !== 'string') tab.inputBuffer = '';
+    const folderPath = tab.sessionWindow.folderPath;
     const clean = data.replace(/\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|\x1bO[\x40-\x7e]/g, '');
     for (const ch of clean) {
       if (ch === '\r' || ch === '\n') {
-        const buf = session.inputBuffer.trim();
-        session.inputBuffer = '';
+        const buf = tab.inputBuffer.trim();
+        tab.inputBuffer = '';
         if (buf) {
-          addNarrationEvent(session.path, 'user-task', `User asked: "${shorten(buf, 180)}"`);
-          setNarrationSummary(session.path, 'active', `Working on: ${shorten(buf, 100)}`);
+          addNarrationEvent(folderPath, 'user-task', `User asked: "${shorten(buf, 180)}"`);
+          setNarrationSummary(folderPath, 'active', `Working on: ${shorten(buf, 100)}`);
         }
       } else if (ch === '\x7f' || ch === '\b') {
-        session.inputBuffer = session.inputBuffer.slice(0, -1);
+        tab.inputBuffer = tab.inputBuffer.slice(0, -1);
       } else if (ch >= ' ') {
-        session.inputBuffer += ch;
+        tab.inputBuffer += ch;
       }
     }
   }
@@ -889,8 +966,9 @@
     },
   ];
 
-  function handleTerminalOutput(session, data) {
-    const n = ensureNarration(session.path);
+  function handleTerminalOutput(tab, data) {
+    const folderPath = tab.sessionWindow.folderPath;
+    const n = ensureNarration(folderPath);
     n.transcriptBuffer = (n.transcriptBuffer + data).slice(-20000);
     const tail = n.transcriptBuffer.slice(-4000);
     for (const hint of NARRATION_HINTS) {
@@ -898,9 +976,9 @@
       if (!hint.test(tail)) continue;
       n.seenHints[hint.key] = true;
       if (hint.asSummary) {
-        setNarrationSummary(session.path, 'completed', hint.text);
+        setNarrationSummary(folderPath, 'completed', hint.text);
       } else {
-        addNarrationEvent(session.path, hint.kind, hint.text);
+        addNarrationEvent(folderPath, hint.kind, hint.text);
       }
     }
   }
