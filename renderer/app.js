@@ -616,37 +616,42 @@
     const target = sessionWindow.tabs.find((t) => t.id === tabId);
     if (!target) return null;
     const opts = options || {};
-    const alreadyActive = sessionWindow.activeTabId === tabId;
 
-    if (!alreadyActive) {
-      for (const other of sessionWindow.tabs) {
-        if (other.id === tabId) continue;
-        if (other.terminalEl) other.terminalEl.hidden = true;
-        if (other.tabChipEl) {
-          other.tabChipEl.classList.remove('is-active');
-          const btn = other.tabChipEl.querySelector('.tab-activate');
-          if (btn) btn.setAttribute('aria-selected', 'false');
-        }
+    if (sessionWindow.activeTabId === tabId) {
+      if (opts.focus) {
+        try { target.term.focus(); } catch {}
       }
-      if (target.terminalEl) target.terminalEl.hidden = false;
-      if (target.tabChipEl) {
-        target.tabChipEl.classList.add('is-active');
-        const btn = target.tabChipEl.querySelector('.tab-activate');
-        if (btn) btn.setAttribute('aria-selected', 'true');
-      }
-      sessionWindow.activeTabId = tabId;
-      sessionWindow.windowEl.dataset.sessionId = tabId;
+      return target;
     }
 
-    // Defer fit/focus so the now-visible host has a real layout box.
-    Promise.resolve().then(async () => {
+    for (const other of sessionWindow.tabs) {
+      if (other.id === tabId) continue;
+      if (other.terminalEl) other.terminalEl.hidden = true;
+      if (other.tabChipEl) {
+        other.tabChipEl.classList.remove('is-active');
+        const btn = other.tabChipEl.querySelector('.tab-activate');
+        if (btn) btn.setAttribute('aria-selected', 'false');
+      }
+    }
+    if (target.terminalEl) target.terminalEl.hidden = false;
+    if (target.tabChipEl) {
+      target.tabChipEl.classList.add('is-active');
+      const btn = target.tabChipEl.querySelector('.tab-activate');
+      if (btn) btn.setAttribute('aria-selected', 'true');
+    }
+    sessionWindow.activeTabId = tabId;
+    sessionWindow.windowEl.dataset.sessionId = tabId;
+
+    // Wait one or two animation frames so the now-visible host has a layout
+    // box, then fit and resize the PTY. Never fit hidden hosts.
+    (async () => {
       await nextFrame();
       await nextFrame();
       fitTab(target);
       if (opts.focus) {
         try { target.term.focus(); } catch {}
       }
-    });
+    })();
 
     return target;
   }
