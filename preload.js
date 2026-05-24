@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('controlPanel', {
   getInitialPath: () => ipcRenderer.invoke('app:initial-path'),
@@ -18,4 +18,7 @@ contextBridge.exposeInMainWorld('controlPanel', {
     ipcRenderer.on('terminal:exit', listener);
     return () => ipcRenderer.removeListener('terminal:exit', listener);
   },
+  readClipboard: () => ipcRenderer.invoke('clipboard:read'),
+  writeClipboard: (text) => ipcRenderer.invoke('clipboard:write', text),
+  getPathForFile: (file) => webUtils.getPathForFile(file),
 });

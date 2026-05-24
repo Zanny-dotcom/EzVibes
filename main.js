@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -211,9 +211,24 @@ function registerIpc(mainWindow) {
     }
     return { success: true };
   });
+
+  mainWindow.webContents.on('context-menu', (event, params) => {
+    if (!params.isEditable && !params.selectionText) return;
+    const items = [];
+    if (params.editFlags.canCut) items.push({ role: 'cut' });
+    if (params.editFlags.canCopy) items.push({ role: 'copy' });
+    if (params.editFlags.canPaste) items.push({ role: 'paste' });
+    if (items.length && params.editFlags.canSelectAll) items.push({ type: 'separator' });
+    if (params.editFlags.canSelectAll) items.push({ role: 'selectAll' });
+    if (items.length) Menu.buildFromTemplate(items).popup({ window: mainWindow });
+  });
+
+  ipcMain.handle('clipboard:read', () => clipboard.readText());
+  ipcMain.handle('clipboard:write', (_, text) => clipboard.writeText(String(text || '')));
 }
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   const win = createWindow();
   registerIpc(win);
 });

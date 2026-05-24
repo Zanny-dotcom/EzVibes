@@ -24,6 +24,7 @@
         <div class="search-wrap">
           <input id="search-input" type="search" placeholder="Search folders" />
         </div>
+        <button id="narration-toggle" class="icon-button narration-toggle" title="What Was Made" aria-pressed="false">▤</button>
       </header>
 
       <main class="shell">
@@ -39,6 +40,17 @@
           </div>
           <div id="grid" class="folder-grid"></div>
         </section>
+
+        <aside id="narration-sidebar" class="narration-sidebar" hidden>
+          <div class="narration-header">
+            <div>
+              <div class="narration-title">What Was Made</div>
+              <div id="narration-folder" class="narration-folder"></div>
+            </div>
+            <button id="narration-close" class="icon-button" title="Close">X</button>
+          </div>
+          <div id="narration-body" class="narration-body"></div>
+        </aside>
       </main>
     </div>
 
