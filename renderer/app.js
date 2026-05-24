@@ -450,9 +450,7 @@
     windowEl.className = 'folder-terminal';
     windowEl.dataset.windowId = windowId;
     windowEl.innerHTML = `
-      <div class="folder-terminal-nubbin" title="Right-click to rename">
-        <span class="nubbin-text"></span>
-      </div>
+      <div class="folder-terminal-tab-strip" role="tablist" aria-label="Claude sessions"></div>
       <div class="folder-terminal-tab">
         <div class="session-controls">
           <button class="session-control minimize" title="Minimize">_</button>
@@ -460,12 +458,18 @@
         </div>
       </div>
       <div class="terminal-pocket">
-        <div class="terminal-host"></div>
+        <div class="terminal-host is-active"></div>
       </div>
     `;
 
-    const nubbinEl = windowEl.querySelector('.folder-terminal-nubbin');
-    nubbinEl.querySelector('.nubbin-text').textContent = name;
+    const tabStripEl = windowEl.querySelector('.folder-terminal-tab-strip');
+    const addTabBtnEl = document.createElement('button');
+    addTabBtnEl.type = 'button';
+    addTabBtnEl.className = 'folder-terminal-tab-add';
+    addTabBtnEl.title = 'New tab';
+    addTabBtnEl.textContent = '+';
+    tabStripEl.appendChild(addTabBtnEl);
+
     const terminalPocketEl = windowEl.querySelector('.terminal-pocket');
     const terminalEl = windowEl.querySelector('.terminal-host');
     els.sessionLayer.appendChild(windowEl);
@@ -475,10 +479,9 @@
       folderPath,
       folderName: name,
       windowEl,
-      tabStripEl: null,
-      addTabBtnEl: null,
+      tabStripEl,
+      addTabBtnEl,
       terminalPocketEl,
-      nubbinEl,
       tabs: [],
       activeTabId: null,
       minimized: false,
@@ -487,16 +490,12 @@
       resizeTimer: null,
     };
 
-    // Build the first tab.
+    // Build the first tab and attach its chip.
     const firstTab = buildTab(sessionWindow, terminalEl);
     sessionWindow.tabs.push(firstTab);
     sessionWindow.activeTabId = firstTab.id;
     state.tabsById.set(firstTab.id, firstTab);
-
-    // For backward compatibility during the tab refactor, the .folder-terminal
-    // section still exposes the active tab id via data-session-id so any code
-    // still using findSessionForElement keeps working until step 8.
-    windowEl.dataset.sessionId = firstTab.id;
+    attachTabChip(sessionWindow, firstTab, { active: true });
 
     windowEl.querySelector('.minimize').addEventListener('click', () => minimizeSessionWindow(sessionWindow, findCard(folderPath)));
     windowEl.querySelector('.close').addEventListener('click', () => closeSessionWindow(sessionWindow));
@@ -508,13 +507,53 @@
       showTerminalContextMenu(tab, event.clientX, event.clientY);
     });
 
-    nubbinEl.addEventListener('contextmenu', (event) => {
+    return sessionWindow;
+  }
+
+  function attachTabChip(sessionWindow, tab, options) {
+    const opts = options || {};
+    const chip = document.createElement('div');
+    chip.className = 'folder-terminal-tab-chip';
+    if (opts.active) chip.classList.add('is-active');
+    chip.setAttribute('role', 'presentation');
+    chip.dataset.tabId = tab.id;
+
+    const activateBtn = document.createElement('button');
+    activateBtn.type = 'button';
+    activateBtn.className = 'tab-activate';
+    activateBtn.setAttribute('role', 'tab');
+    activateBtn.setAttribute('aria-selected', opts.active ? 'true' : 'false');
+    const labelText = getTabLabel(tab);
+    activateBtn.title = `Tab ${labelText}`;
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'tab-label';
+    labelSpan.textContent = labelText;
+    activateBtn.appendChild(labelSpan);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.type = 'button';
+    closeBtn.className = 'tab-close';
+    closeBtn.title = 'Close tab';
+    closeBtn.textContent = '×';
+
+    chip.appendChild(activateBtn);
+    chip.appendChild(closeBtn);
+
+    // Insert the chip before the add button so the + always stays on the right.
+    sessionWindow.tabStripEl.insertBefore(chip, sessionWindow.addTabBtnEl);
+
+    tab.tabChipEl = chip;
+    tab.tabLabelEl = labelSpan;
+    tab.closeBtnEl = closeBtn;
+
+    chip.addEventListener('contextmenu', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      showNubbinContextMenu(firstTab, event.clientX, event.clientY);
+      showTabContextMenu(tab, event.clientX, event.clientY);
     });
 
-    return sessionWindow;
+    return chip;
   }
 
   function buildTab(sessionWindow, terminalEl) {
@@ -751,10 +790,10 @@
     return `"${p}"`;
   }
 
-  function showNubbinContextMenu(tab, x, y) {
+  function showTabContextMenu(tab, x, y) {
     hideContextMenu();
     els.contextMenu.innerHTML = '';
-    addMenuItem('Rename', () => startRename(tab));
+    addMenuItem('Rename', () => startTabRename(tab));
     els.contextMenu.hidden = false;
     const rect = els.contextMenu.getBoundingClientRect();
     const left = Math.min(x, window.innerWidth - rect.width - 12);
@@ -763,33 +802,45 @@
     els.contextMenu.style.top = `${Math.max(12, top)}px`;
   }
 
-  function startRename(tab) {
-    const nubbin = tab.sessionWindow.nubbinEl;
-    if (!nubbin || nubbin.querySelector('.nubbin-input')) return;
-    const original = tab.customName || tab.sessionWindow.folderName;
-    nubbin.innerHTML = '';
+  function startTabRename(tab) {
+    const labelEl = tab.tabLabelEl;
+    if (!labelEl) return;
+    const chip = tab.tabChipEl;
+    if (chip && chip.querySelector('.tab-rename-input')) return;
+    const original = getTabLabel(tab);
+    const numericFallback = String(tab.numericLabel);
+
     const input = document.createElement('input');
-    input.className = 'nubbin-input';
+    input.className = 'tab-rename-input';
     input.type = 'text';
     input.value = original;
     input.maxLength = 120;
     input.spellcheck = false;
-    nubbin.appendChild(input);
+
+    labelEl.replaceWith(input);
     input.focus();
     input.select();
 
     let settled = false;
-    const finish = (rawValue) => {
+    const finish = (rawValue, { cancel } = {}) => {
       if (settled) return;
       settled = true;
       const trimmed = (rawValue || '').trim();
-      const finalName = trimmed || original;
-      tab.customName = finalName === tab.sessionWindow.folderName ? null : finalName;
-      nubbin.innerHTML = '';
+      if (!cancel) {
+        if (!trimmed || trimmed === numericFallback) {
+          tab.customName = null;
+        } else {
+          tab.customName = trimmed;
+        }
+      }
+      const newLabel = getTabLabel(tab);
       const span = document.createElement('span');
-      span.className = 'nubbin-text';
-      span.textContent = finalName;
-      nubbin.appendChild(span);
+      span.className = 'tab-label';
+      span.textContent = newLabel;
+      input.replaceWith(span);
+      tab.tabLabelEl = span;
+      const activateBtn = chip ? chip.querySelector('.tab-activate') : null;
+      if (activateBtn) activateBtn.title = `Tab ${newLabel}`;
     };
 
     input.addEventListener('keydown', (event) => {
@@ -800,7 +851,7 @@
       } else if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        finish(original);
+        finish(original, { cancel: true });
       } else {
         event.stopPropagation();
       }
