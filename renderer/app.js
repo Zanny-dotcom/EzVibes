@@ -453,9 +453,14 @@
     return sessionWindow.tabs.find((t) => t.id === id) || sessionWindow.tabs[0] || null;
   }
 
+  function defaultTabLabel(tab) {
+    const agentName = (tab && tab.agent === 'codex') ? 'CODEX' : 'CLAUDE';
+    return tab && tab.numericLabel > 1 ? `${agentName} ${tab.numericLabel}` : agentName;
+  }
+
   function getTabLabel(tab) {
     if (!tab) return '';
-    return tab.customName || String(tab.numericLabel);
+    return tab.customName || defaultTabLabel(tab);
   }
 
   function createSessionWindow(folderPath) {
@@ -1010,7 +1015,7 @@
     const chip = tab.tabChipEl;
     if (chip && chip.querySelector('.tab-rename-input')) return;
     const original = getTabLabel(tab);
-    const numericFallback = String(tab.numericLabel);
+    const restoreDefault = defaultTabLabel(tab);
 
     const input = document.createElement('input');
     input.className = 'tab-rename-input';
@@ -1029,7 +1034,7 @@
       settled = true;
       const trimmed = (rawValue || '').trim();
       if (!cancel) {
-        if (!trimmed || trimmed === numericFallback) {
+        if (!trimmed || trimmed === restoreDefault) {
           tab.customName = null;
         } else {
           tab.customName = trimmed;
