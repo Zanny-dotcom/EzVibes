@@ -11,6 +11,7 @@
     narrationByPath: new Map(),
     narrationOpen: false,
     previewPath: '',
+    viewMode: 'all',
   };
 
   const els = {};
@@ -23,6 +24,7 @@
     els.searchInput = document.getElementById('search-input');
     els.grid = document.getElementById('grid');
     els.quickPaths = document.getElementById('quick-paths');
+    els.activeSessionsBtn = document.getElementById('active-sessions-btn');
     els.folderCount = document.getElementById('folder-count');
     els.contextMenu = document.getElementById('context-menu');
     els.sessionLayer = document.getElementById('session-layer');
@@ -58,6 +60,15 @@
       renderGrid();
     });
     els.newSessionBtn.addEventListener('click', () => launchClaudeForPath(state.currentPath, null));
+    els.activeSessionsBtn.addEventListener('click', () => {
+      state.viewMode = 'active-sessions';
+      state.previewPath = '';
+      els.searchInput.value = '';
+      state.query = '';
+      renderSidebarState();
+      renderGrid();
+      renderNarrationSidebar();
+    });
     els.narrationToggle.addEventListener('click', () => {
       state.narrationOpen = !state.narrationOpen;
       els.narrationToggle.setAttribute('aria-pressed', state.narrationOpen ? 'true' : 'false');
@@ -229,10 +240,10 @@
       addNarrationEvent(folderPath, isError ? 'error' : 'completed', `Tab ${label}: ${agentLabel} session exited with code ${exitCode}.`);
       // Only set the folder-level summary when every tab in the window has
       // exited, so a single dead tab doesn't make the whole folder look done.
-      const allDead = tab.sessionWindow.tabs.every((t) => !t.ptyAlive);
-      if (allDead) {
-        setNarrationSummary(folderPath, isError ? 'error' : 'completed', isError ? `Exited with error code ${exitCode}.` : 'Session completed.');
-      }
+      updateNarrationForNoLiveTabs(tab.sessionWindow, {
+        status: isError ? 'error' : 'completed',
+        summary: isError ? `Exited with error code ${exitCode}.` : 'Session completed.',
+      });
     });
   }
 
@@ -248,6 +259,8 @@
     state.previewPath = '';
     els.searchInput.value = '';
     state.query = '';
+    state.viewMode = 'all';
+    renderSidebarState();
     renderPath();
     renderGrid();
     renderNarrationSidebar();
@@ -270,17 +283,56 @@
     }
   }
 
+  function renderSidebarState() {
+    if (!els.activeSessionsBtn) return;
+    els.activeSessionsBtn.classList.toggle('is-active', state.viewMode === 'active-sessions');
+  }
+
   function renderPath() {
     els.pathBar.textContent = state.currentPath;
     els.backBtn.disabled = state.history.length === 0;
     els.upBtn.disabled = !state.parentPath || state.parentPath === state.currentPath;
   }
 
+  function getVisibleEntries() {
+    let entries;
+    if (state.viewMode === 'active-sessions') {
+      entries = Array.from(state.windowsByPath.keys()).map((path) => ({
+        path,
+        name: basename(path),
+        kind: 'directory',
+      }));
+    } else {
+      entries = state.entries;
+    }
+    if (state.query) {
+      entries = entries.filter((entry) => entry.name.toLowerCase().includes(state.query));
+    }
+    return entries;
+  }
+
+  function formatFolderCount(count) {
+    if (state.viewMode === 'active-sessions') {
+      if (count === 0) return 'No active sessions';
+      return `${count} active session${count === 1 ? '' : 's'}`;
+    }
+    return `${count} item${count === 1 ? '' : 's'}`;
+  }
+
   function renderGrid() {
-    const query = state.query;
-    const entries = state.entries.filter((entry) => !query || entry.name.toLowerCase().includes(query));
+    const entries = getVisibleEntries();
     els.grid.innerHTML = '';
-    els.folderCount.textContent = `${entries.length} item${entries.length === 1 ? '' : 's'}`;
+    els.folderCount.textContent = formatFolderCount(entries.length);
+
+    if (entries.length === 0 && state.viewMode === 'active-sessions') {
+      const empty = document.createElement('div');
+      empty.className = 'grid-empty-state';
+      empty.textContent = state.query
+        ? 'No active sessions match your search.'
+        : 'No active sessions. Launch Claude in a folder to see it here.';
+      els.grid.appendChild(empty);
+      return;
+    }
 
     for (const entry of entries) {
       const card = document.createElement('button');
@@ -417,6 +469,10 @@
       tab.term.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
       if (tab.tabChipEl) tab.tabChipEl.classList.add('is-exited');
       addNarrationEvent(folderPath, 'error', `Failed to launch Claude in ${basename(folderPath)}: ${message}`);
+      updateNarrationForNoLiveTabs(sessionWindow, {
+        status: 'error',
+        summary: message,
+      });
     }
   }
 
@@ -714,6 +770,10 @@
     }
 
     addNarrationEvent(sessionWindow.folderPath, 'tab-closed', `Closed tab ${label} in ${basename(sessionWindow.folderPath)}.`);
+    updateNarrationForNoLiveTabs(sessionWindow, {
+      status: 'closed',
+      summary: 'All terminal instances are closed.',
+    });
   }
 
   async function createTab(sessionWindow, options) {
@@ -765,6 +825,10 @@
       tab.term.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
       if (tab.tabChipEl) tab.tabChipEl.classList.add('is-exited');
       addNarrationEvent(sessionWindow.folderPath, 'error', `Failed to launch ${agentLabel} in tab ${getTabLabel(tab)}: ${message}`);
+      updateNarrationForNoLiveTabs(sessionWindow, {
+        status: 'error',
+        summary: message,
+      });
     }
 
     return tab;
@@ -796,6 +860,7 @@
 
   async function closeSessionWindow(sessionWindow, options) {
     const opts = options || {};
+    const hadTabs = sessionWindow.tabs.length > 0;
 
     if (sessionWindow.resizeObserver) {
       sessionWindow.resizeObserver.disconnect();
@@ -815,6 +880,14 @@
     }
     sessionWindow.tabs.length = 0;
     sessionWindow.activeTabId = null;
+
+    if (hadTabs) {
+      addNarrationEvent(sessionWindow.folderPath, 'session-closed', `Closed all terminal instances in ${basename(sessionWindow.folderPath)}.`);
+      updateNarrationForNoLiveTabs(sessionWindow, {
+        status: 'closed',
+        summary: 'All terminal instances are closed.',
+      });
+    }
 
     // Drop the window from the path map immediately so the folder card stops
     // rendering as session-open/minimized while the animation plays.
@@ -1134,6 +1207,18 @@
     n.status = status;
     n.summary = summary;
     if ((state.previewPath || state.currentPath) === folderPath) renderNarrationSidebar();
+  }
+
+  function updateNarrationForNoLiveTabs(sessionWindow, options) {
+    if (!sessionWindow) return;
+    const hasLiveTab = sessionWindow.tabs.some((tab) => tab.ptyAlive);
+    if (hasLiveTab) return;
+    const opts = options || {};
+    setNarrationSummary(
+      sessionWindow.folderPath,
+      opts.status || 'closed',
+      opts.summary || 'All terminal instances are closed.'
+    );
   }
 
   function renderNarrationSidebar() {
