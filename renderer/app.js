@@ -221,11 +221,17 @@
       tab.ptyAlive = false;
       tab.exited = true;
       tab.term.writeln(`\r\n\x1b[90m[Claude session exited with code ${exitCode}]\x1b[0m`);
-      tab.sessionWindow.windowEl.classList.add('session-exited');
+      if (tab.tabChipEl) tab.tabChipEl.classList.add('is-exited');
       const isError = exitCode !== 0;
       const folderPath = tab.sessionWindow.folderPath;
-      addNarrationEvent(folderPath, isError ? 'error' : 'completed', `Claude session exited with code ${exitCode}.`);
-      setNarrationSummary(folderPath, isError ? 'error' : 'completed', isError ? `Exited with error code ${exitCode}.` : 'Session completed.');
+      const label = getTabLabel(tab);
+      addNarrationEvent(folderPath, isError ? 'error' : 'completed', `Tab ${label}: Claude session exited with code ${exitCode}.`);
+      // Only set the folder-level summary when every tab in the window has
+      // exited, so a single dead tab doesn't make the whole folder look done.
+      const allDead = tab.sessionWindow.tabs.every((t) => !t.ptyAlive);
+      if (allDead) {
+        setNarrationSummary(folderPath, isError ? 'error' : 'completed', isError ? `Exited with error code ${exitCode}.` : 'Session completed.');
+      }
     });
   }
 
@@ -391,16 +397,24 @@
     await fitAfterStableLayout(tab, { focus: true, waitForAnimation: true });
     observeSessionSize(sessionWindow);
 
-    const result = await api.createTerminal({
-      sessionId: tab.id,
-      cwd: folderPath,
-      cols: tab.term.cols,
-      rows: tab.term.rows,
-    });
+    let result;
+    try {
+      result = await api.createTerminal({
+        sessionId: tab.id,
+        cwd: folderPath,
+        cols: tab.term.cols,
+        rows: tab.term.rows,
+      });
+    } catch (error) {
+      result = { success: false, error: (error && error.message) || String(error) };
+    }
 
     if (!result || !result.success) {
+      const message = (result && result.error) || 'Failed to launch Claude.';
       tab.ptyAlive = false;
-      tab.term.writeln(`\r\n\x1b[31m${result ? result.error : 'Failed to launch Claude.'}\x1b[0m`);
+      tab.term.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
+      if (tab.tabChipEl) tab.tabChipEl.classList.add('is-exited');
+      addNarrationEvent(folderPath, 'error', `Failed to launch Claude: ${message}`);
     }
   }
 
