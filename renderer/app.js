@@ -6,7 +6,7 @@
     entries: [],
     history: [],
     query: '',
-    sessionsByPath: new Map(),
+    windowsByPath: new Map(),
     sessionsById: new Map(),
     narrationByPath: new Map(),
     narrationOpen: false,
@@ -278,7 +278,7 @@
       card.dataset.path = entry.path;
       card.title = entry.path;
 
-      const session = state.sessionsByPath.get(entry.path);
+      const session = state.windowsByPath.get(entry.path);
       if (session) {
         if (session.minimized) card.classList.add('session-minimized');
         else card.classList.add('session-open');
@@ -329,13 +329,13 @@
     if (entry.kind === 'directory') {
       addMenuItem('Open Folder', () => navigateTo(entry.path));
       addMenuItem('Launch Claude', () => launchClaudeForPath(entry.path, sourceCard));
-      const session = state.sessionsByPath.get(entry.path);
+      const session = state.windowsByPath.get(entry.path);
       if (session) {
         addMenuItem(session.minimized ? 'Restore Session' : 'Minimize Session', () => {
-          if (session.minimized) restoreSession(session, sourceCard);
-          else minimizeSession(session, sourceCard);
+          if (session.minimized) restoreSessionWindow(session, sourceCard);
+          else minimizeSessionWindow(session, sourceCard);
         });
-        addMenuItem('Close Session', () => closeSession(session));
+        addMenuItem('Close Session', () => closeSessionWindow(session));
       }
     } else {
       addMenuItem('No folder actions', null, true);
@@ -369,14 +369,14 @@
   }
 
   async function launchClaudeForPath(folderPath, sourceCard) {
-    const existing = state.sessionsByPath.get(folderPath);
+    const existing = state.windowsByPath.get(folderPath);
     if (existing) {
-      restoreSession(existing, sourceCard || findCard(folderPath));
+      restoreSessionWindow(existing, sourceCard || findCard(folderPath));
       return;
     }
 
-    const session = createSession(folderPath);
-    state.sessionsByPath.set(folderPath, session);
+    const session = createSessionWindow(folderPath);
+    state.windowsByPath.set(folderPath, session);
     state.sessionsById.set(session.id, session);
     addNarrationEvent(folderPath, 'session-started', `Claude launched in ${basename(folderPath)}.`);
     setNarrationSummary(folderPath, 'active', 'Claude session started.');
@@ -400,7 +400,7 @@
     }
   }
 
-  function createSession(folderPath) {
+  function createSessionWindow(folderPath) {
     const name = basename(folderPath);
     const id = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
     const windowEl = document.createElement('section');
@@ -473,8 +473,8 @@
       exited: false,
     };
 
-    windowEl.querySelector('.minimize').addEventListener('click', () => minimizeSession(session, findCard(folderPath)));
-    windowEl.querySelector('.close').addEventListener('click', () => closeSession(session));
+    windowEl.querySelector('.minimize').addEventListener('click', () => minimizeSessionWindow(session, findCard(folderPath)));
+    windowEl.querySelector('.close').addEventListener('click', () => closeSessionWindow(session));
 
     terminalEl.addEventListener('contextmenu', (event) => {
       event.preventDefault();
@@ -491,7 +491,7 @@
     return session;
   }
 
-  function minimizeSession(session, sourceCard) {
+  function minimizeSessionWindow(session, sourceCard) {
     if (session.minimized) return;
     const card = sourceCard || findCard(session.path);
     setAnimationTarget(session.windowEl, card, '--to-x', '--to-y');
@@ -506,7 +506,7 @@
     });
   }
 
-  function restoreSession(session, sourceCard) {
+  function restoreSessionWindow(session, sourceCard) {
     session.windowEl.hidden = false;
     session.minimized = false;
     animateOpen(session, sourceCard || findCard(session.path));
@@ -514,14 +514,14 @@
     fitAfterStableLayout(session, { focus: true, waitForAnimation: true });
   }
 
-  async function closeSession(session) {
+  async function closeSessionWindow(session) {
     await api.closeTerminal(session.id);
     if (session.resizeObserver) session.resizeObserver.disconnect();
     if (session.resizeTimer) clearTimeout(session.resizeTimer);
     session.term.dispose();
     session.windowEl.remove();
     state.sessionsById.delete(session.id);
-    state.sessionsByPath.delete(session.path);
+    state.windowsByPath.delete(session.path);
     renderGrid();
   }
 
