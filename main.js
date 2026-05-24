@@ -5,10 +5,14 @@ const os = require('os');
 const { execSync } = require('child_process');
 const pty = require('node-pty');
 
+const APP_USER_MODEL_ID = 'com.ezvibes.cp';
+const APP_ICON_PATH = path.join(__dirname, 'renderer', 'ezvibes.ico');
 const sessions = new Map();
 
 let currentMainWindow = null;
 let ipcRegistered = false;
+
+app.setAppUserModelId(APP_USER_MODEL_ID);
 
 function setCurrentMainWindow(win) {
   currentMainWindow = win;
@@ -137,6 +141,7 @@ function createWindow() {
     backgroundColor: '#101312',
     show: false,
     title: 'Claude Control Panel',
+    icon: APP_ICON_PATH,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

@@ -77,6 +77,8 @@ Then press **Win**, type `ezvibes`, right-click the result, and choose **Pin to 
 
 The shortcut targets `wscript.exe ezvibes.vbs`, which runs Electron without a console window flash.
 
+The main process sets Windows AppUserModelID `com.ezvibes.cp`, and the shortcut installer stamps the same ID onto Start Menu/taskbar shortcuts. `BrowserWindow` also uses `renderer/ezvibes.ico`, so launched windows group with the pinned Z folder shortcut instead of Electron's default identity.
+
 ## Runtime Model
 
 Renderer code must not use Node/Electron directly. It talks to main through `window.controlPanel` from `preload.js`.

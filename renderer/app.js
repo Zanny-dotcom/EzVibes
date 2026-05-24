@@ -235,6 +235,10 @@
       const tab = state.tabsById.get(sessionId);
       if (!tab) return;
       tab.term.write(data);
+      if (!isTabVisible(tab)) {
+        tab.needsViewportRefresh = true;
+        tab.scrollToBottomOnReveal = true;
+      }
       handleTerminalOutput(tab, data);
     });
 
@@ -1131,6 +1135,8 @@
       lastNotificationKey: '',
       lastNotificationAt: 0,
       attentionState: false,
+      needsViewportRefresh: false,
+      scrollToBottomOnReveal: false,
       term,
       fitAddon,
       terminalEl,
@@ -1150,6 +1156,9 @@
     const opts = options || {};
 
     if (sessionWindow.activeTabId === tabId) {
+      if (target.needsViewportRefresh || target.scrollToBottomOnReveal) {
+        scheduleStableFit(target, { scrollToBottom: target.scrollToBottomOnReveal });
+      }
       if (opts.focus) {
         try { target.term.focus(); } catch {}
       }
@@ -1173,6 +1182,7 @@
       await nextFrame();
       await nextFrame();
       fitTab(target);
+      repairTerminalViewport(target, { scrollToBottom: target.scrollToBottomOnReveal });
       if (opts.focus) {
         try { target.term.focus(); } catch {}
       }
@@ -1332,6 +1342,8 @@
   function minimizeSessionWindow(sessionWindow, sourceCard) {
     if (sessionWindow.minimized) return;
     closeNewTabMenu(sessionWindow, { restoreFocus: false });
+    const activeTab = getActiveTab(sessionWindow);
+    if (activeTab) activeTab.needsViewportRefresh = true;
     const card = sourceCard || findCard(sessionWindow.folderPath);
     setAnimationTarget(sessionWindow.windowEl, card, '--to-x', '--to-y');
     sessionWindow.windowEl.classList.remove('opening');
@@ -1493,6 +1505,9 @@
     await nextFrame();
     await nextFrame();
     fitTab(tab);
+    repairTerminalViewport(tab, {
+      scrollToBottom: opts.scrollToBottom || tab.scrollToBottomOnReveal,
+    });
     if (opts.focus) tab.term.focus();
   }
 
@@ -1503,6 +1518,34 @@
     try {
       tab.fitAddon.fit();
       api.resizeTerminal(tab.id, tab.term.cols, tab.term.rows);
+    } catch {}
+  }
+
+  function isTabVisible(tab) {
+    if (!tab || !tab.sessionWindow || !tab.terminalEl) return false;
+    const sessionWindow = tab.sessionWindow;
+    return !sessionWindow.minimized
+      && !sessionWindow.windowEl.hidden
+      && !tab.terminalEl.hidden;
+  }
+
+  function repairTerminalViewport(tab, options) {
+    if (!isTabVisible(tab)) return;
+    const opts = options || {};
+    const shouldScroll = !!opts.scrollToBottom;
+    refreshTerminalViewport(tab, shouldScroll);
+    requestAnimationFrame(() => refreshTerminalViewport(tab, shouldScroll));
+    tab.needsViewportRefresh = false;
+    tab.scrollToBottomOnReveal = false;
+  }
+
+  function refreshTerminalViewport(tab, scrollToBottom) {
+    if (!isTabVisible(tab)) return;
+    try {
+      if (scrollToBottom) tab.term.scrollToBottom();
+      tab.term.refresh(0, Math.max(0, tab.term.rows - 1));
+      const viewport = tab.terminalEl.querySelector('.xterm-viewport');
+      if (scrollToBottom && viewport) viewport.scrollTop = viewport.scrollHeight;
     } catch {}
   }
 
@@ -1747,6 +1790,13 @@
     );
   }
 
+  function scrollNarrationToBottom() {
+    if (!els.narrationBody) return;
+    requestAnimationFrame(() => {
+      els.narrationBody.scrollTop = els.narrationBody.scrollHeight;
+    });
+  }
+
   function renderNarrationSidebar() {
     if (!els.narrationSidebar) return;
     els.narrationSidebar.hidden = !state.narrationOpen;
@@ -1792,7 +1842,7 @@
     }
 
     els.narrationBody.append(summary, timeline);
-    els.narrationBody.scrollTop = els.narrationBody.scrollHeight;
+    scrollNarrationToBottom();
   }
 
   function shorten(value, max) {
