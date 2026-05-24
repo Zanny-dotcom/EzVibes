@@ -500,6 +500,11 @@
     windowEl.querySelector('.minimize').addEventListener('click', () => minimizeSessionWindow(sessionWindow, findCard(folderPath)));
     windowEl.querySelector('.close').addEventListener('click', () => closeSessionWindow(sessionWindow));
 
+    addTabBtnEl.addEventListener('click', (event) => {
+      event.stopPropagation();
+      createTab(sessionWindow);
+    });
+
     terminalEl.addEventListener('contextmenu', (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -546,6 +551,16 @@
     tab.tabChipEl = chip;
     tab.tabLabelEl = labelSpan;
     tab.closeBtnEl = closeBtn;
+
+    activateBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      activateTab(sessionWindow, tab.id, { focus: true });
+    });
+
+    closeBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      // Wired in step 6.
+    });
 
     chip.addEventListener('contextmenu', (event) => {
       event.preventDefault();
@@ -594,6 +609,96 @@
     const id = hostEl.dataset && hostEl.dataset.tabId;
     if (!id) return null;
     return state.tabsById.get(id) || null;
+  }
+
+  function activateTab(sessionWindow, tabId, options) {
+    if (!sessionWindow) return null;
+    const target = sessionWindow.tabs.find((t) => t.id === tabId);
+    if (!target) return null;
+    const opts = options || {};
+    const alreadyActive = sessionWindow.activeTabId === tabId;
+
+    if (!alreadyActive) {
+      for (const other of sessionWindow.tabs) {
+        if (other.id === tabId) continue;
+        if (other.terminalEl) other.terminalEl.hidden = true;
+        if (other.tabChipEl) {
+          other.tabChipEl.classList.remove('is-active');
+          const btn = other.tabChipEl.querySelector('.tab-activate');
+          if (btn) btn.setAttribute('aria-selected', 'false');
+        }
+      }
+      if (target.terminalEl) target.terminalEl.hidden = false;
+      if (target.tabChipEl) {
+        target.tabChipEl.classList.add('is-active');
+        const btn = target.tabChipEl.querySelector('.tab-activate');
+        if (btn) btn.setAttribute('aria-selected', 'true');
+      }
+      sessionWindow.activeTabId = tabId;
+      sessionWindow.windowEl.dataset.sessionId = tabId;
+    }
+
+    // Defer fit/focus so the now-visible host has a real layout box.
+    Promise.resolve().then(async () => {
+      await nextFrame();
+      await nextFrame();
+      fitTab(target);
+      if (opts.focus) {
+        try { target.term.focus(); } catch {}
+      }
+    });
+
+    return target;
+  }
+
+  async function createTab(sessionWindow) {
+    if (!sessionWindow) return null;
+
+    // Build the new terminal-host inside the pocket.
+    const terminalEl = document.createElement('div');
+    terminalEl.className = 'terminal-host';
+    sessionWindow.terminalPocketEl.appendChild(terminalEl);
+
+    const tab = buildTab(sessionWindow, terminalEl);
+    sessionWindow.tabs.push(tab);
+    state.tabsById.set(tab.id, tab);
+    attachTabChip(sessionWindow, tab, { active: false });
+
+    tab.term.open(tab.terminalEl);
+    tab.term.onData((data) => handleTerminalInput(tab, data));
+
+    terminalEl.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      showTerminalContextMenu(tab, event.clientX, event.clientY);
+    });
+
+    // Activate it so this tab becomes visible and fits properly.
+    activateTab(sessionWindow, tab.id, { focus: true });
+
+    addNarrationEvent(sessionWindow.folderPath, 'tab-opened', `Opened tab ${getTabLabel(tab)} in ${basename(sessionWindow.folderPath)}.`);
+
+    let result;
+    try {
+      result = await api.createTerminal({
+        sessionId: tab.id,
+        cwd: sessionWindow.folderPath,
+        cols: tab.term.cols,
+        rows: tab.term.rows,
+      });
+    } catch (error) {
+      result = { success: false, error: (error && error.message) || String(error) };
+    }
+
+    if (!result || !result.success) {
+      const message = (result && result.error) || 'Failed to launch Claude.';
+      tab.ptyAlive = false;
+      tab.term.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
+      if (tab.tabChipEl) tab.tabChipEl.classList.add('is-exited');
+      addNarrationEvent(sessionWindow.folderPath, 'error', `Failed to launch Claude in tab ${getTabLabel(tab)}: ${message}`);
+    }
+
+    return tab;
   }
 
   function minimizeSessionWindow(sessionWindow, sourceCard) {
