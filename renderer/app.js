@@ -404,6 +404,7 @@
         cwd: folderPath,
         cols: tab.term.cols,
         rows: tab.term.rows,
+        agent: 'claude',
       });
     } catch (error) {
       result = { success: false, error: (error && error.message) || String(error) };
@@ -505,7 +506,7 @@
     };
 
     // Build the first tab and attach its chip.
-    const firstTab = buildTab(sessionWindow, terminalEl);
+    const firstTab = buildTab(sessionWindow, terminalEl, 'claude');
     sessionWindow.tabs.push(firstTab);
     sessionWindow.activeTabId = firstTab.id;
     state.tabsById.set(firstTab.id, firstTab);
@@ -585,7 +586,7 @@
     return chip;
   }
 
-  function buildTab(sessionWindow, terminalEl) {
+  function buildTab(sessionWindow, terminalEl, agent) {
     const id = makeId();
     terminalEl.dataset.tabId = id;
 
@@ -602,6 +603,7 @@
     const tab = {
       id,
       sessionWindow,
+      agent: agent === 'codex' ? 'codex' : 'claude',
       numericLabel: sessionWindow.nextTabNumber++,
       customName: null,
       ptyAlive: true,
@@ -701,15 +703,18 @@
     addNarrationEvent(sessionWindow.folderPath, 'tab-closed', `Closed tab ${label} in ${basename(sessionWindow.folderPath)}.`);
   }
 
-  async function createTab(sessionWindow) {
+  async function createTab(sessionWindow, options) {
     if (!sessionWindow) return null;
+    const opts = options || {};
+    const agent = opts.agent === 'codex' ? 'codex' : 'claude';
+    const agentLabel = agent === 'codex' ? 'Codex' : 'Claude';
 
     // Build the new terminal-host inside the pocket.
     const terminalEl = document.createElement('div');
     terminalEl.className = 'terminal-host';
     sessionWindow.terminalPocketEl.appendChild(terminalEl);
 
-    const tab = buildTab(sessionWindow, terminalEl);
+    const tab = buildTab(sessionWindow, terminalEl, agent);
     sessionWindow.tabs.push(tab);
     state.tabsById.set(tab.id, tab);
     attachTabChip(sessionWindow, tab, { active: false });
@@ -735,17 +740,18 @@
         cwd: sessionWindow.folderPath,
         cols: tab.term.cols,
         rows: tab.term.rows,
+        agent,
       });
     } catch (error) {
       result = { success: false, error: (error && error.message) || String(error) };
     }
 
     if (!result || !result.success) {
-      const message = (result && result.error) || 'Failed to launch Claude.';
+      const message = (result && result.error) || `Failed to launch ${agentLabel}.`;
       tab.ptyAlive = false;
       tab.term.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
       if (tab.tabChipEl) tab.tabChipEl.classList.add('is-exited');
-      addNarrationEvent(sessionWindow.folderPath, 'error', `Failed to launch Claude in tab ${getTabLabel(tab)}: ${message}`);
+      addNarrationEvent(sessionWindow.folderPath, 'error', `Failed to launch ${agentLabel} in tab ${getTabLabel(tab)}: ${message}`);
     }
 
     return tab;
