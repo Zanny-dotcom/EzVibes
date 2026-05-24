@@ -220,12 +220,13 @@
       if (!tab) return;
       tab.ptyAlive = false;
       tab.exited = true;
-      tab.term.writeln(`\r\n\x1b[90m[Claude session exited with code ${exitCode}]\x1b[0m`);
+      const agentLabel = tab.agent === 'codex' ? 'Codex' : 'Claude';
+      tab.term.writeln(`\r\n\x1b[90m[${agentLabel} session exited with code ${exitCode}]\x1b[0m`);
       if (tab.tabChipEl) tab.tabChipEl.classList.add('is-exited');
       const isError = exitCode !== 0;
       const folderPath = tab.sessionWindow.folderPath;
       const label = getTabLabel(tab);
-      addNarrationEvent(folderPath, isError ? 'error' : 'completed', `Tab ${label}: Claude session exited with code ${exitCode}.`);
+      addNarrationEvent(folderPath, isError ? 'error' : 'completed', `Tab ${label}: ${agentLabel} session exited with code ${exitCode}.`);
       // Only set the folder-level summary when every tab in the window has
       // exited, so a single dead tab doesn't make the whole folder look done.
       const allDead = tab.sessionWindow.tabs.every((t) => !t.ptyAlive);
@@ -415,7 +416,7 @@
       tab.ptyAlive = false;
       tab.term.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
       if (tab.tabChipEl) tab.tabChipEl.classList.add('is-exited');
-      addNarrationEvent(folderPath, 'error', `Failed to launch Claude: ${message}`);
+      addNarrationEvent(folderPath, 'error', `Failed to launch Claude in ${basename(folderPath)}: ${message}`);
     }
   }
 
@@ -542,6 +543,7 @@
     if (opts.active) chip.classList.add('is-active');
     chip.setAttribute('role', 'presentation');
     chip.dataset.tabId = tab.id;
+    chip.dataset.agent = tab.agent === 'codex' ? 'codex' : 'claude';
 
     const activateBtn = document.createElement('button');
     activateBtn.type = 'button';
