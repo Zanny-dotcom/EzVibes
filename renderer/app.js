@@ -92,6 +92,18 @@
     window.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') hideContextMenu();
     });
+    window.addEventListener('keydown', (event) => {
+      const target = event.target;
+      if (!target || !target.closest || !target.closest('.terminal-host')) return;
+      const wantsTabFocus = event.key === 'F6'
+        || (event.key === 'Tab' && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey);
+      if (!wantsTabFocus) return;
+      const tab = findTabForElement(target);
+      if (!tab) return;
+      event.preventDefault();
+      event.stopPropagation();
+      focusTabButton(tab);
+    }, true);
     window.addEventListener('resize', () => {
       for (const sessionWindow of state.windowsByPath.values()) {
         const tab = getActiveTab(sessionWindow);
@@ -231,9 +243,12 @@
       if (!tab) return;
       tab.ptyAlive = false;
       tab.exited = true;
-      const agentLabel = tab.agent === 'codex' ? 'Codex' : 'Claude';
+      const agentLabel = getAgentLabel(tab);
       tab.term.writeln(`\r\n\x1b[90m[${agentLabel} session exited with code ${exitCode}]\x1b[0m`);
       if (tab.tabChipEl) tab.tabChipEl.classList.add('is-exited');
+      // When the user initiated the close, the close path already logs
+      // "Closed tab X" — skip the exit narration to avoid duplicate events.
+      if (tab._suppressExitEvent) return;
       const isError = exitCode !== 0;
       const folderPath = tab.sessionWindow.folderPath;
       const label = getTabLabel(tab);
@@ -344,6 +359,9 @@
       if (sessionWindow) {
         if (sessionWindow.minimized) card.classList.add('session-minimized');
         else card.classList.add('session-open');
+        if (sessionWindow.attentionState && sessionWindow.minimized) {
+          card.classList.add('needs-attention');
+        }
       }
       if (state.previewPath && entry.path === state.previewPath) {
         card.classList.add('preview-selected');
@@ -397,7 +415,7 @@
           if (sessionWindow.minimized) restoreSessionWindow(sessionWindow, sourceCard);
           else minimizeSessionWindow(sessionWindow, sourceCard);
         });
-        addMenuItem('Close Session', () => closeSessionWindow(sessionWindow, { animate: true }));
+        addMenuItem('Close Session', () => requestCloseSessionWindow(sessionWindow, { animate: true }));
       }
     } else {
       addMenuItem('No folder actions', null, true);
@@ -439,8 +457,7 @@
 
     const sessionWindow = createSessionWindow(folderPath);
     state.windowsByPath.set(folderPath, sessionWindow);
-    addNarrationEvent(folderPath, 'session-started', `Claude launched in ${basename(folderPath)}.`);
-    setNarrationSummary(folderPath, 'active', 'Claude session started.');
+    addNarrationEvent(folderPath, 'session-started', `Opening Claude in ${basename(folderPath)}…`);
     renderGrid();
 
     const tab = getActiveTab(sessionWindow);
@@ -466,6 +483,8 @@
     if (!result || !result.success) {
       const message = (result && result.error) || 'Failed to launch Claude.';
       tab.ptyAlive = false;
+      tab.exited = true;
+      tab.failed = true;
       tab.term.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
       if (tab.tabChipEl) tab.tabChipEl.classList.add('is-exited');
       addNarrationEvent(folderPath, 'error', `Failed to launch Claude in ${basename(folderPath)}: ${message}`);
@@ -473,6 +492,9 @@
         status: 'error',
         summary: message,
       });
+    } else {
+      setNarrationSummary(folderPath, 'active', 'Claude session started.');
+      addNarrationEvent(folderPath, 'tab-started', `Started Claude tab ${getTabLabel(tab)} in ${basename(folderPath)}.`);
     }
   }
 
@@ -503,6 +525,387 @@
     return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
   }
 
+  function getAgentLabel(tab) {
+    return (tab && tab.agent === 'codex') ? 'Codex' : 'Claude';
+  }
+
+  function getAgentShortLabel(tab) {
+    return (tab && tab.agent === 'codex') ? 'CX' : 'CL';
+  }
+
+  function isTabLive(tab) {
+    return !!tab && tab.ptyAlive === true && tab.exited !== true && tab.failed !== true;
+  }
+
+  function hasLiveTabs(sessionWindow) {
+    if (!sessionWindow || !sessionWindow.tabs) return false;
+    return sessionWindow.tabs.some(isTabLive);
+  }
+
+  function getTabButton(tab) {
+    return tab && tab.tabChipEl ? tab.tabChipEl.querySelector('.tab-activate') : null;
+  }
+
+  function focusTabButton(tab) {
+    const btn = getTabButton(tab);
+    if (!btn) return false;
+    btn.focus();
+    return true;
+  }
+
+  function syncTabA11y(sessionWindow) {
+    if (!sessionWindow) return;
+    const activeId = sessionWindow.activeTabId;
+    for (const tab of sessionWindow.tabs) {
+      if (!tab.tabChipEl) continue;
+      const btn = getTabButton(tab);
+      if (!btn) continue;
+      const isActive = tab.id === activeId;
+      btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      btn.tabIndex = isActive ? 0 : -1;
+      const label = `${getAgentLabel(tab)} tab: ${getTabLabel(tab)}`;
+      btn.setAttribute('aria-label', label);
+      btn.title = `Tab ${getTabLabel(tab)}`;
+      if (tab.terminalEl) {
+        tab.terminalEl.hidden = !isActive;
+      }
+    }
+  }
+
+  function handleTabKeydown(sessionWindow, tab, event) {
+    if (!sessionWindow || !tab) return;
+    const chip = tab.tabChipEl;
+    if (chip && chip.querySelector('.tab-rename-input')) return;
+    const key = event.key;
+    const tabs = sessionWindow.tabs;
+    const idx = tabs.indexOf(tab);
+    if (idx < 0) return;
+    let nextIdx = -1;
+    if (key === 'ArrowLeft') nextIdx = (idx - 1 + tabs.length) % tabs.length;
+    else if (key === 'ArrowRight') nextIdx = (idx + 1) % tabs.length;
+    else if (key === 'Home') nextIdx = 0;
+    else if (key === 'End') nextIdx = tabs.length - 1;
+    else if (key === 'Delete') {
+      event.preventDefault();
+      event.stopPropagation();
+      requestCloseTab(tab, { trigger: chip && chip.querySelector('.tab-activate') });
+      return;
+    } else return;
+    event.preventDefault();
+    event.stopPropagation();
+    const target = tabs[nextIdx];
+    if (!target) return;
+    activateTab(sessionWindow, target.id, { focus: false });
+    const targetBtn = target.tabChipEl && target.tabChipEl.querySelector('.tab-activate');
+    if (targetBtn) targetBtn.focus();
+  }
+
+  function openNewTabMenu(sessionWindow) {
+    if (!sessionWindow || sessionWindow.newTabMenuOpen) return;
+    sessionWindow.newTabMenuPrevFocus = document.activeElement;
+    const menu = document.createElement('div');
+    menu.className = 'new-tab-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'New tab options');
+
+    const items = [
+      { label: 'New Claude tab', agent: 'claude' },
+      { label: 'New Codex tab', agent: 'codex' },
+    ];
+    const buttons = items.map((it) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'new-tab-menu-item';
+      b.setAttribute('role', 'menuitem');
+      b.tabIndex = -1;
+      b.textContent = it.label;
+      b.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        closeNewTabMenu(sessionWindow, { restoreFocus: false });
+        createTab(sessionWindow, { agent: it.agent });
+      });
+      menu.appendChild(b);
+      return b;
+    });
+
+    menu.addEventListener('keydown', (ev) => {
+      const active = document.activeElement;
+      const i = buttons.indexOf(active);
+      if (ev.key === 'ArrowDown') {
+        ev.preventDefault();
+        buttons[(i + 1 + buttons.length) % buttons.length].focus();
+      } else if (ev.key === 'ArrowUp') {
+        ev.preventDefault();
+        buttons[(i - 1 + buttons.length) % buttons.length].focus();
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        closeNewTabMenu(sessionWindow);
+      } else if (ev.key === 'Tab') {
+        closeNewTabMenu(sessionWindow);
+      }
+    });
+
+    const addBtn = sessionWindow.addTabBtnEl;
+    const btnRect = addBtn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.top = `${btnRect.bottom + 4}px`;
+    menu.style.left = `${btnRect.left}px`;
+    document.body.appendChild(menu);
+
+    sessionWindow.newTabMenuEl = menu;
+    sessionWindow.newTabMenuOpen = true;
+    addBtn.setAttribute('aria-expanded', 'true');
+    buttons[0].focus();
+
+    const outsideHandler = (ev) => {
+      if (menu.contains(ev.target) || ev.target === addBtn) return;
+      closeNewTabMenu(sessionWindow);
+    };
+    sessionWindow._newTabMenuOutsideHandler = outsideHandler;
+    setTimeout(() => document.addEventListener('mousedown', outsideHandler, true), 0);
+  }
+
+  function closeNewTabMenu(sessionWindow, options) {
+    if (!sessionWindow || !sessionWindow.newTabMenuOpen) return;
+    const opts = options || {};
+    const menu = sessionWindow.newTabMenuEl;
+    if (menu && menu.parentNode) menu.parentNode.removeChild(menu);
+    sessionWindow.newTabMenuEl = null;
+    sessionWindow.newTabMenuOpen = false;
+    if (sessionWindow.addTabBtnEl) sessionWindow.addTabBtnEl.setAttribute('aria-expanded', 'false');
+    if (sessionWindow._newTabMenuOutsideHandler) {
+      document.removeEventListener('mousedown', sessionWindow._newTabMenuOutsideHandler, true);
+      sessionWindow._newTabMenuOutsideHandler = null;
+    }
+    if (opts.restoreFocus !== false) {
+      const target = sessionWindow.newTabMenuPrevFocus || sessionWindow.addTabBtnEl;
+      try { target.focus(); } catch { try { sessionWindow.addTabBtnEl.focus(); } catch {} }
+    }
+    sessionWindow.newTabMenuPrevFocus = null;
+  }
+
+  let _modalInFlight = false;
+  function confirmDestructiveClose(opts) {
+    if (_modalInFlight) return Promise.resolve(false);
+    _modalInFlight = true;
+    const {
+      title = 'Close terminal?',
+      body = '',
+      confirmLabel = 'Close',
+      cancelLabel = 'Cancel',
+      returnFocusTo = null,
+      danger = true,
+    } = opts || {};
+
+    return new Promise((resolve) => {
+      const backdrop = document.createElement('div');
+      backdrop.className = 'modal-backdrop';
+      const dialog = document.createElement('div');
+      dialog.className = 'modal-dialog';
+      dialog.setAttribute('role', 'alertdialog');
+      dialog.setAttribute('aria-modal', 'true');
+      dialog.setAttribute('aria-labelledby', 'modal-title');
+      dialog.setAttribute('aria-describedby', 'modal-body');
+
+      const h = document.createElement('h2');
+      h.id = 'modal-title';
+      h.className = 'modal-title';
+      h.textContent = title;
+
+      const p = document.createElement('p');
+      p.id = 'modal-body';
+      p.className = 'modal-body';
+      p.textContent = body;
+
+      const actions = document.createElement('div');
+      actions.className = 'modal-actions';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.type = 'button';
+      cancelBtn.className = 'modal-btn modal-btn-cancel';
+      cancelBtn.textContent = cancelLabel;
+      const confirmBtn = document.createElement('button');
+      confirmBtn.type = 'button';
+      confirmBtn.className = 'modal-btn modal-btn-confirm' + (danger ? ' is-danger' : '');
+      confirmBtn.textContent = confirmLabel;
+      actions.append(cancelBtn, confirmBtn);
+
+      dialog.append(h, p, actions);
+      backdrop.appendChild(dialog);
+      document.body.appendChild(backdrop);
+
+      const cleanup = (result) => {
+        window.removeEventListener('keydown', onKey, true);
+        if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+        _modalInFlight = false;
+        try { if (returnFocusTo && typeof returnFocusTo.focus === 'function') returnFocusTo.focus(); } catch {}
+        resolve(result);
+      };
+
+      const onKey = (event) => {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          cleanup(false);
+        } else if (event.key === 'Tab') {
+          event.preventDefault();
+          const next = document.activeElement === confirmBtn ? cancelBtn : confirmBtn;
+          next.focus();
+        } else if (event.key === 'Enter') {
+          if (document.activeElement === cancelBtn) {
+            event.preventDefault();
+            cleanup(false);
+          } else {
+            event.preventDefault();
+            cleanup(true);
+          }
+        }
+      };
+
+      backdrop.addEventListener('mousedown', (event) => {
+        if (event.target === backdrop) cleanup(false);
+      });
+      cancelBtn.addEventListener('click', () => cleanup(false));
+      confirmBtn.addEventListener('click', () => cleanup(true));
+      window.addEventListener('keydown', onKey, true);
+
+      requestAnimationFrame(() => confirmBtn.focus());
+    });
+  }
+
+  function syncSessionAttention(sessionWindow) {
+    if (!sessionWindow) return;
+    sessionWindow.attentionState = sessionWindow.tabs.some((tab) => tab.attentionState);
+    const card = findCard(sessionWindow.folderPath);
+    if (card) card.classList.toggle('needs-attention', !!sessionWindow.attentionState && !!sessionWindow.minimized);
+  }
+
+  function markTabAttention(tab) {
+    if (!tab || !tab.sessionWindow) return;
+    tab.attentionState = true;
+    syncSessionAttention(tab.sessionWindow);
+  }
+
+  function clearSessionAttention(sessionWindow) {
+    if (!sessionWindow) return;
+    for (const tab of sessionWindow.tabs) {
+      tab.attentionState = false;
+    }
+    syncSessionAttention(sessionWindow);
+  }
+
+  function clearTabAttention(tab) {
+    if (!tab || !tab.sessionWindow) return;
+    tab.attentionState = false;
+    syncSessionAttention(tab.sessionWindow);
+  }
+
+  const OSC_BUFFER_MAX = 8192;
+  const OSC_INTRO = '\x1b]';
+
+  function extractOscEvents(buffer, newData) {
+    let buf = (buffer || '') + (newData || '');
+    const events = [];
+
+    while (true) {
+      const start = buf.indexOf(OSC_INTRO);
+      if (start < 0) {
+        buf = buf.slice(-1) === '\x1b' ? '\x1b' : '';
+        break;
+      }
+      if (start > 0) buf = buf.slice(start);
+
+      const bel = buf.indexOf('\x07', 2);
+      const st = buf.indexOf('\x1b\\', 2);
+      let termIdx = -1;
+      let termLen = 0;
+      if (bel >= 0 && (st < 0 || bel < st)) { termIdx = bel; termLen = 1; }
+      else if (st >= 0) { termIdx = st; termLen = 2; }
+
+      if (termIdx < 0) {
+        if (buf.length > OSC_BUFFER_MAX) buf = buf.slice(-OSC_BUFFER_MAX);
+        break;
+      }
+
+      const payload = buf.slice(2, termIdx);
+      buf = buf.slice(termIdx + termLen);
+
+      const semi = payload.indexOf(';');
+      if (semi < 0) continue;
+      const code = payload.slice(0, semi);
+      const rest = payload.slice(semi + 1);
+
+      if (code === '9') {
+        const parts = rest.split(';');
+        // ConEmu OSC 9 subcommands (cwd, tab title, progress, etc.) put a small
+        // integer in the first field — those are not notifications. Free-text
+        // notifications are `9;<message>` or `9;<title>;<body>`.
+        if (parts.length > 0 && /^\d{1,2}$/.test(parts[0])) {
+          // ignore ConEmu subcommand
+        } else {
+          const title = parts.length >= 2 ? parts[0] : '';
+          const body = parts.length >= 2 ? parts.slice(1).join(';') : parts[0];
+          events.push({ kind: 'osc9', title, body, raw: payload });
+        }
+      } else if (code === '777') {
+        const parts = rest.split(';');
+        if (parts[0] && parts[0].toLowerCase() === 'notify') {
+          const title = parts[1] || '';
+          const body = parts.slice(2).join(';');
+          events.push({ kind: 'osc777', title, body, raw: payload });
+        }
+      }
+    }
+
+    return { buffer: buf, events };
+  }
+
+  function classifyNotification(text) {
+    const s = String(text || '');
+    if (/\b(waiting|input|permission|approval|approve|approved|confirm|confirmed)\b/i.test(s)) return 'needs-attention';
+    if (/\b(complete|completed|done|finished|stopped|stop)\b/i.test(s)) return 'completed';
+    return 'notification';
+  }
+
+  function processOscNotifications(tab, data) {
+    if (!tab) return false;
+    const result = extractOscEvents(tab.oscBuffer || '', data);
+    tab.oscBuffer = result.buffer;
+    if (result.events.length === 0) return false;
+
+    const folderPath = tab.sessionWindow.folderPath;
+    const agentLabel = getAgentLabel(tab);
+    const tabLabel = getTabLabel(tab);
+    let any = false;
+
+    for (const ev of result.events) {
+      const text = (ev.body || ev.title || '').trim();
+      if (!text) continue;
+      const classification = classifyNotification(`${ev.title} ${ev.body}`);
+      const dedupKey = `${classification}|${text.slice(0, 80)}`;
+      const now = Date.now();
+      if (tab.lastNotificationKey === dedupKey && (now - (tab.lastNotificationAt || 0)) < 2000) continue;
+      tab.lastNotificationKey = dedupKey;
+      tab.lastNotificationAt = now;
+      any = true;
+
+      if (classification === 'needs-attention') {
+        addNarrationEvent(folderPath, 'attention', `${agentLabel} (${tabLabel}) needs attention: ${shorten(text, 200)}`);
+        setNarrationSummary(folderPath, 'waiting', `${agentLabel} needs attention: ${shorten(text, 120)}`);
+        markTabAttention(tab);
+      } else if (classification === 'completed') {
+        clearTabAttention(tab);
+        addNarrationEvent(folderPath, 'completed', `${agentLabel} (${tabLabel}): ${shorten(text, 200)}`);
+        const others = tab.sessionWindow.tabs.filter((t) => t !== tab && isTabLive(t));
+        if (others.length === 0) {
+          setNarrationSummary(folderPath, 'completed', shorten(text, 120));
+        }
+      } else {
+        addNarrationEvent(folderPath, 'notification', `${agentLabel} (${tabLabel}): ${shorten(text, 200)}`);
+      }
+    }
+    return any;
+  }
+
   function getActiveTab(sessionWindow) {
     if (!sessionWindow) return null;
     const id = sessionWindow.activeTabId;
@@ -527,7 +930,7 @@
     windowEl.className = 'folder-terminal';
     windowEl.dataset.windowId = windowId;
     windowEl.innerHTML = `
-      <div class="folder-terminal-tab-strip" role="tablist" aria-label="Claude sessions"></div>
+      <div class="folder-terminal-tab-strip" role="tablist" aria-label="Agent sessions"></div>
       <div class="folder-terminal-tab">
         <div class="session-controls">
           <button class="session-control minimize" title="Minimize">_</button>
@@ -543,7 +946,10 @@
     const addTabBtnEl = document.createElement('button');
     addTabBtnEl.type = 'button';
     addTabBtnEl.className = 'folder-terminal-tab-add';
-    addTabBtnEl.title = 'Left-click: new Claude tab  —  Right-click: new Codex tab';
+    addTabBtnEl.title = 'New tab — click to open menu, right-click for Codex';
+    addTabBtnEl.setAttribute('aria-label', 'New terminal tab');
+    addTabBtnEl.setAttribute('aria-haspopup', 'menu');
+    addTabBtnEl.setAttribute('aria-expanded', 'false');
     addTabBtnEl.textContent = '+';
     tabStripEl.appendChild(addTabBtnEl);
 
@@ -565,6 +971,10 @@
       nextTabNumber: 1,
       resizeObserver: null,
       resizeTimer: null,
+      newTabMenuEl: null,
+      newTabMenuOpen: false,
+      newTabMenuPrevFocus: null,
+      attentionState: false,
     };
 
     // Build the first tab and attach its chip.
@@ -575,11 +985,23 @@
     attachTabChip(sessionWindow, firstTab, { active: true });
 
     windowEl.querySelector('.minimize').addEventListener('click', () => minimizeSessionWindow(sessionWindow, findCard(folderPath)));
-    windowEl.querySelector('.close').addEventListener('click', () => closeSessionWindow(sessionWindow, { animate: true }));
+    const sessionCloseBtn = windowEl.querySelector('.close');
+    sessionCloseBtn.addEventListener('click', () => requestCloseSessionWindow(sessionWindow, { animate: true, returnFocusTo: sessionCloseBtn }));
 
     addTabBtnEl.addEventListener('click', (event) => {
       event.stopPropagation();
-      createTab(sessionWindow, { agent: 'claude' });
+      if (sessionWindow.newTabMenuOpen) closeNewTabMenu(sessionWindow);
+      else openNewTabMenu(sessionWindow);
+    });
+
+    addTabBtnEl.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') {
+        event.preventDefault();
+        openNewTabMenu(sessionWindow);
+      } else if (event.key === 'Escape' && sessionWindow.newTabMenuOpen) {
+        event.preventDefault();
+        closeNewTabMenu(sessionWindow);
+      }
     });
 
     addTabBtnEl.addEventListener('contextmenu', (event) => {
@@ -610,20 +1032,32 @@
     const activateBtn = document.createElement('button');
     activateBtn.type = 'button';
     activateBtn.className = 'tab-activate';
+    activateBtn.id = tab.tabButtonId;
     activateBtn.setAttribute('role', 'tab');
+    activateBtn.setAttribute('aria-controls', tab.panelId);
     activateBtn.setAttribute('aria-selected', opts.active ? 'true' : 'false');
+    activateBtn.tabIndex = opts.active ? 0 : -1;
     const labelText = getTabLabel(tab);
+    activateBtn.setAttribute('aria-label', `${getAgentLabel(tab)} tab: ${labelText}`);
     activateBtn.title = `Tab ${labelText}`;
+
+    const badgeSpan = document.createElement('span');
+    badgeSpan.className = 'tab-agent-badge';
+    badgeSpan.setAttribute('aria-hidden', 'true');
+    badgeSpan.dataset.agent = tab.agent;
+    badgeSpan.textContent = getAgentShortLabel(tab);
 
     const labelSpan = document.createElement('span');
     labelSpan.className = 'tab-label';
     labelSpan.textContent = labelText;
-    activateBtn.appendChild(labelSpan);
+
+    activateBtn.append(badgeSpan, labelSpan);
 
     const closeBtn = document.createElement('button');
     closeBtn.type = 'button';
     closeBtn.className = 'tab-close';
     closeBtn.title = 'Close tab';
+    closeBtn.setAttribute('aria-label', `Close ${getAgentLabel(tab)} tab: ${labelText}`);
     closeBtn.textContent = '×';
 
     chip.appendChild(activateBtn);
@@ -634,6 +1068,7 @@
 
     tab.tabChipEl = chip;
     tab.tabLabelEl = labelSpan;
+    tab.tabBadgeEl = badgeSpan;
     tab.closeBtnEl = closeBtn;
 
     activateBtn.addEventListener('click', (event) => {
@@ -641,9 +1076,13 @@
       activateTab(sessionWindow, tab.id, { focus: true });
     });
 
+    activateBtn.addEventListener('keydown', (event) => {
+      handleTabKeydown(sessionWindow, tab, event);
+    });
+
     closeBtn.addEventListener('click', (event) => {
       event.stopPropagation();
-      closeTab(tab);
+      requestCloseTab(tab, { trigger: closeBtn });
     });
 
     chip.addEventListener('contextmenu', (event) => {
@@ -657,7 +1096,14 @@
 
   function buildTab(sessionWindow, terminalEl, agent) {
     const id = makeId();
+    const tabButtonId = `tab-btn-${id}`;
+    const panelId = `tab-panel-${id}`;
     terminalEl.dataset.tabId = id;
+    terminalEl.id = panelId;
+    terminalEl.setAttribute('role', 'tabpanel');
+    terminalEl.setAttribute('aria-labelledby', tabButtonId);
+    terminalEl.setAttribute('tabindex', '0');
+    terminalEl.setAttribute('aria-keyshortcuts', 'F6 Shift+Tab');
 
     const term = new Terminal({
       cursorBlink: true,
@@ -671,18 +1117,26 @@
 
     const tab = {
       id,
+      tabButtonId,
+      panelId,
       sessionWindow,
       agent: agent === 'codex' ? 'codex' : 'claude',
       numericLabel: sessionWindow.nextTabNumber++,
       customName: null,
       ptyAlive: true,
       exited: false,
+      failed: false,
       inputBuffer: '',
+      oscBuffer: '',
+      lastNotificationKey: '',
+      lastNotificationAt: 0,
+      attentionState: false,
       term,
       fitAddon,
       terminalEl,
       tabChipEl: null,
       tabLabelEl: null,
+      tabBadgeEl: null,
       closeBtnEl: null,
     };
 
@@ -704,20 +1158,14 @@
 
     for (const other of sessionWindow.tabs) {
       if (other.id === tabId) continue;
-      if (other.terminalEl) other.terminalEl.hidden = true;
-      if (other.tabChipEl) {
-        other.tabChipEl.classList.remove('is-active');
-        const btn = other.tabChipEl.querySelector('.tab-activate');
-        if (btn) btn.setAttribute('aria-selected', 'false');
-      }
+      if (other.tabChipEl) other.tabChipEl.classList.remove('is-active');
     }
-    if (target.terminalEl) target.terminalEl.hidden = false;
-    if (target.tabChipEl) {
-      target.tabChipEl.classList.add('is-active');
-      const btn = target.tabChipEl.querySelector('.tab-activate');
-      if (btn) btn.setAttribute('aria-selected', 'true');
-    }
+    if (target.tabChipEl) target.tabChipEl.classList.add('is-active');
     sessionWindow.activeTabId = tabId;
+    syncTabA11y(sessionWindow);
+    if (!sessionWindow.minimized && !sessionWindow.windowEl.hidden) {
+      clearSessionAttention(sessionWindow);
+    }
 
     // Wait one or two animation frames so the now-visible host has a layout
     // box, then fit and resize the PTY. Never fit hidden hosts.
@@ -733,16 +1181,53 @@
     return target;
   }
 
-  async function closeTab(tab) {
+  async function requestCloseTab(tab, options) {
     if (!tab) return;
     const sessionWindow = tab.sessionWindow;
     if (!sessionWindow) return;
+    if (tab._closing) return;
+    const trigger = (options && options.trigger) || null;
 
-    // If this is the last tab, closing it closes the whole window.
-    if (sessionWindow.tabs.length <= 1) {
-      await closeSessionWindow(sessionWindow, { animate: true });
+    // Failed/exited tabs close without confirmation.
+    if (!isTabLive(tab)) {
+      tab._closing = true;
+      try {
+        if (sessionWindow.tabs.length <= 1) {
+          await performCloseSessionWindow(sessionWindow, { animate: true, skipConfirm: true });
+        } else {
+          await performCloseTab(tab);
+        }
+      } finally { tab._closing = false; }
       return;
     }
+
+    // Live tab: confirm only when this is the LAST tab (closing destroys the window + scrollback).
+    if (sessionWindow.tabs.length <= 1) {
+      const agentLabel = getAgentLabel(tab);
+      const folderName = basename(sessionWindow.folderPath);
+      const ok = await confirmDestructiveClose({
+        title: 'Close terminal?',
+        body: `This terminal is still running. Closing it will end the ${agentLabel} session in "${folderName}" and lose its scrollback.`,
+        confirmLabel: 'Close terminal',
+        returnFocusTo: trigger,
+      });
+      if (!ok) return;
+      tab._closing = true;
+      try { await performCloseSessionWindow(sessionWindow, { animate: true, skipConfirm: true }); }
+      finally { tab._closing = false; }
+      return;
+    }
+
+    // Mid-window live tab: window stays open after close, no confirmation.
+    tab._closing = true;
+    try { await performCloseTab(tab); }
+    finally { tab._closing = false; }
+  }
+
+  async function performCloseTab(tab) {
+    if (!tab) return;
+    const sessionWindow = tab.sessionWindow;
+    if (!sessionWindow) return;
 
     const label = getTabLabel(tab);
     const index = sessionWindow.tabs.indexOf(tab);
@@ -755,6 +1240,7 @@
       neighbor = sessionWindow.tabs[index + 1] || sessionWindow.tabs[index - 1] || null;
     }
 
+    tab._suppressExitEvent = true;
     try { await api.closeTerminal(tab.id); } catch {}
     try { tab.term.dispose(); } catch {}
 
@@ -763,11 +1249,16 @@
 
     if (index >= 0) sessionWindow.tabs.splice(index, 1);
     state.tabsById.delete(tab.id);
+    syncSessionAttention(sessionWindow);
 
     if (wasActive) {
       sessionWindow.activeTabId = null;
       if (neighbor) activateTab(sessionWindow, neighbor.id, { focus: true });
+      else if (sessionWindow.addTabBtnEl) {
+        try { sessionWindow.addTabBtnEl.focus(); } catch {}
+      }
     }
+    syncTabA11y(sessionWindow);
 
     addNarrationEvent(sessionWindow.folderPath, 'tab-closed', `Closed tab ${label} in ${basename(sessionWindow.folderPath)}.`);
     updateNarrationForNoLiveTabs(sessionWindow, {
@@ -804,7 +1295,7 @@
     // Activate it so this tab becomes visible and fits properly.
     activateTab(sessionWindow, tab.id, { focus: true });
 
-    addNarrationEvent(sessionWindow.folderPath, 'tab-opened', `Opened tab ${getTabLabel(tab)} in ${basename(sessionWindow.folderPath)}.`);
+    addNarrationEvent(sessionWindow.folderPath, 'tab-created', `Created ${agentLabel} tab ${getTabLabel(tab)} in ${basename(sessionWindow.folderPath)}.`);
 
     let result;
     try {
@@ -822,6 +1313,8 @@
     if (!result || !result.success) {
       const message = (result && result.error) || `Failed to launch ${agentLabel}.`;
       tab.ptyAlive = false;
+      tab.exited = true;
+      tab.failed = true;
       tab.term.writeln(`\r\n\x1b[31m${message}\x1b[0m`);
       if (tab.tabChipEl) tab.tabChipEl.classList.add('is-exited');
       addNarrationEvent(sessionWindow.folderPath, 'error', `Failed to launch ${agentLabel} in tab ${getTabLabel(tab)}: ${message}`);
@@ -829,6 +1322,8 @@
         status: 'error',
         summary: message,
       });
+    } else {
+      addNarrationEvent(sessionWindow.folderPath, 'tab-started', `Started ${agentLabel} tab ${getTabLabel(tab)} in ${basename(sessionWindow.folderPath)}.`);
     }
 
     return tab;
@@ -836,6 +1331,7 @@
 
   function minimizeSessionWindow(sessionWindow, sourceCard) {
     if (sessionWindow.minimized) return;
+    closeNewTabMenu(sessionWindow, { restoreFocus: false });
     const card = sourceCard || findCard(sessionWindow.folderPath);
     setAnimationTarget(sessionWindow.windowEl, card, '--to-x', '--to-y');
     sessionWindow.windowEl.classList.remove('opening');
@@ -852,15 +1348,39 @@
   function restoreSessionWindow(sessionWindow, sourceCard) {
     sessionWindow.windowEl.hidden = false;
     sessionWindow.minimized = false;
+    clearSessionAttention(sessionWindow);
     animateOpen(sessionWindow, sourceCard || findCard(sessionWindow.folderPath));
     renderGrid();
     const tab = getActiveTab(sessionWindow);
     if (tab) fitAfterStableLayout(tab, { focus: true, waitForAnimation: true });
   }
 
-  async function closeSessionWindow(sessionWindow, options) {
+  async function requestCloseSessionWindow(sessionWindow, options) {
+    if (!sessionWindow) return;
+    if (sessionWindow._closing) return;
+    const opts = options || {};
+    if (!opts.skipConfirm && hasLiveTabs(sessionWindow)) {
+      const liveCount = sessionWindow.tabs.filter(isTabLive).length;
+      const folderName = basename(sessionWindow.folderPath);
+      const noun = liveCount === 1 ? 'live terminal' : 'live terminals';
+      const ok = await confirmDestructiveClose({
+        title: 'Close session window?',
+        body: `This session has ${liveCount} ${noun} in "${folderName}". Closing the window will end every running session and lose all scrollback.`,
+        confirmLabel: 'Close session',
+        returnFocusTo: opts.returnFocusTo || null,
+      });
+      if (!ok) return;
+    }
+    sessionWindow._closing = true;
+    try { await performCloseSessionWindow(sessionWindow, Object.assign({}, opts, { skipConfirm: true })); }
+    finally { sessionWindow._closing = false; }
+  }
+
+  async function performCloseSessionWindow(sessionWindow, options) {
     const opts = options || {};
     const hadTabs = sessionWindow.tabs.length > 0;
+
+    closeNewTabMenu(sessionWindow, { restoreFocus: false });
 
     if (sessionWindow.resizeObserver) {
       sessionWindow.resizeObserver.disconnect();
@@ -874,6 +1394,7 @@
     // Kill or close every tab PTY and dispose every xterm.
     const tabs = sessionWindow.tabs.slice();
     for (const tab of tabs) {
+      tab._suppressExitEvent = true;
       try { await api.closeTerminal(tab.id); } catch {}
       try { tab.term.dispose(); } catch {}
       state.tabsById.delete(tab.id);
@@ -1128,7 +1649,12 @@
       input.replaceWith(span);
       tab.tabLabelEl = span;
       const activateBtn = chip ? chip.querySelector('.tab-activate') : null;
-      if (activateBtn) activateBtn.title = `Tab ${newLabel}`;
+      if (activateBtn) {
+        activateBtn.title = `Tab ${newLabel}`;
+        activateBtn.setAttribute('aria-label', `${getAgentLabel(tab)} tab: ${newLabel}`);
+      }
+      const closeBtn = chip ? chip.querySelector('.tab-close') : null;
+      if (closeBtn) closeBtn.setAttribute('aria-label', `Close ${getAgentLabel(tab)} tab: ${newLabel}`);
     };
 
     input.addEventListener('keydown', (event) => {
@@ -1318,6 +1844,7 @@
   ];
 
   function handleTerminalOutput(tab, data) {
+    processOscNotifications(tab, data);
     const folderPath = tab.sessionWindow.folderPath;
     const n = ensureNarration(folderPath);
     n.transcriptBuffer = (n.transcriptBuffer + data).slice(-20000);

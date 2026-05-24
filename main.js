@@ -7,6 +7,22 @@ const pty = require('node-pty');
 
 const sessions = new Map();
 
+let currentMainWindow = null;
+let ipcRegistered = false;
+
+function setCurrentMainWindow(win) {
+  currentMainWindow = win;
+  win.on('closed', () => {
+    if (currentMainWindow === win) currentMainWindow = null;
+  });
+}
+
+function sendToCurrentWindow(channel, payload) {
+  const win = currentMainWindow;
+  if (!win || win.isDestroyed()) return;
+  win.webContents.send(channel, payload);
+}
+
 const PWSH_PROMPT_WRAPPER = [
   '$__origPrompt = $function:prompt',
   'function global:prompt {',
@@ -134,10 +150,26 @@ function createWindow() {
   win.once('ready-to-show', () => win.show());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  win.webContents.on('context-menu', (event, params) => {
+    if (!params.isEditable && !params.selectionText) return;
+    const items = [];
+    if (params.editFlags.canCut) items.push({ role: 'cut' });
+    if (params.editFlags.canCopy) items.push({ role: 'copy' });
+    if (params.editFlags.canPaste) items.push({ role: 'paste' });
+    if (items.length && params.editFlags.canSelectAll) items.push({ type: 'separator' });
+    if (params.editFlags.canSelectAll) items.push({ role: 'selectAll' });
+    if (items.length) Menu.buildFromTemplate(items).popup({ window: win });
+  });
+
+  setCurrentMainWindow(win);
   return win;
 }
 
-function registerIpc(mainWindow) {
+function registerIpcHandlers() {
+  if (ipcRegistered) return;
+  ipcRegistered = true;
+
   ipcMain.handle('app:initial-path', () => documentsPath());
   ipcMain.handle('app:quick-paths', () => quickPaths());
   ipcMain.handle('fs:list-directory', (_, folderPath) => listDirectory(folderPath));
@@ -179,16 +211,12 @@ function registerIpc(mainWindow) {
     }
 
     terminalProcess.onData((data) => {
-      if (!mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('terminal:data', { sessionId, data });
-      }
+      sendToCurrentWindow('terminal:data', { sessionId, data });
     });
 
     terminalProcess.onExit(({ exitCode }) => {
       sessions.delete(sessionId);
-      if (!mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('terminal:exit', { sessionId, exitCode });
-      }
+      sendToCurrentWindow('terminal:exit', { sessionId, exitCode });
     });
 
     sessions.set(sessionId, terminalProcess);
@@ -223,25 +251,14 @@ function registerIpc(mainWindow) {
     return { success: true };
   });
 
-  mainWindow.webContents.on('context-menu', (event, params) => {
-    if (!params.isEditable && !params.selectionText) return;
-    const items = [];
-    if (params.editFlags.canCut) items.push({ role: 'cut' });
-    if (params.editFlags.canCopy) items.push({ role: 'copy' });
-    if (params.editFlags.canPaste) items.push({ role: 'paste' });
-    if (items.length && params.editFlags.canSelectAll) items.push({ type: 'separator' });
-    if (params.editFlags.canSelectAll) items.push({ role: 'selectAll' });
-    if (items.length) Menu.buildFromTemplate(items).popup({ window: mainWindow });
-  });
-
   ipcMain.handle('clipboard:read', () => clipboard.readText());
   ipcMain.handle('clipboard:write', (_, text) => clipboard.writeText(String(text || '')));
 }
 
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
-  const win = createWindow();
-  registerIpc(win);
+  registerIpcHandlers();
+  createWindow();
 });
 
 app.on('before-quit', () => {
@@ -259,7 +276,6 @@ app.on('window-all-closed', () => {
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    const win = createWindow();
-    registerIpc(win);
+    createWindow();
   }
 });
