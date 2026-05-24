@@ -39,6 +39,10 @@ Core interaction:
 - `renderer/app.js` — folder browser UI, context menu, session window + tab state, terminal popup lifecycle, narration sidebar logic. One IIFE, ~1200 lines.
 - `renderer/styles.css` — Explorer-like UI, folder visuals, orange minimized state, Genie-style animations, narration sidebar.
 - `scripts/postinstall.js` — patches/rebuilds `node-pty` for Windows/Electron.
+- `scripts/build-ezvibes-icon.ps1` — one-off PowerShell generator that draws a yellow folder + black "Z" via .NET System.Drawing and writes `renderer/ezvibes.ico` (PNG-in-ICO at 16/24/32/48/64/128/256 px).
+- `renderer/ezvibes.ico` — generated icon for the Windows shortcut. Committed; re-run the generator if you tweak the design.
+- `ezvibes.vbs` — silent Electron launcher. Invoked via `wscript.exe` so launching from a shortcut shows no console window. Resolves the app dir from its own path.
+- `startup/Install-EzvibesShortcuts.ps1` — installs the Start Menu shortcut, refreshes any existing taskbar pin, and optionally writes a Startup folder shortcut. See `startup/README.md`.
 - `docs/superpowers/specs/` — approved feature designs.
 - `docs/superpowers/plans/` — in-flight feature plans.
 - `tab-plan.md` — design + step-by-step implementation outline for Chrome-style tabs per session window. **Implemented; retained for reference.**
@@ -57,6 +61,21 @@ npm install
 ```
 
 `npm install` runs `scripts/postinstall.js`, which patches `node-pty` build files and runs `@electron/rebuild`.
+
+## ezvibes Launcher
+
+CP can also be launched and pinned to the taskbar as a normal Windows app, surfaced by searching `ezvibes` in the Start menu.
+
+One-time setup:
+
+```powershell
+./scripts/build-ezvibes-icon.ps1   # only if renderer/ezvibes.ico is missing or you tweaked the design
+./startup/Install-EzvibesShortcuts.ps1
+```
+
+Then press **Win**, type `ezvibes`, right-click the result, and choose **Pin to taskbar**. Re-running `Install-EzvibesShortcuts.ps1` will keep that pin in sync with the latest launcher + icon. Add `-CreateStartupShortcut` to also auto-launch CP at sign-in. See `startup/README.md` for details.
+
+The shortcut targets `wscript.exe ezvibes.vbs`, which runs Electron without a console window flash.
 
 ## Runtime Model
 
@@ -158,6 +177,7 @@ This avoids clipping the right edge of terminal content.
 - Folder icons are CSS-drawn, not native Windows icons/thumbnails.
 - Orange minimized state exists only in memory.
 - If the selected folder is no longer visible after navigation, restore/minimize animation falls back to screen center.
+- First-time taskbar pin still requires the user to right-click the Start menu result and select "Pin to taskbar"; subsequent re-runs of `startup/Install-EzvibesShortcuts.ps1` keep the pin in sync.
 
 ## Cautions
 
