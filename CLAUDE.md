@@ -132,11 +132,12 @@ This avoids clipping the right edge of terminal content.
 - Right-clicking a folder opens actions (`Launch Claude`, minimize/restore when a session window exists, rename, etc.).
 - Right-clicking a file has no real actions yet.
 - `Launch Claude Here` launches a Claude session window for the current directory.
-- Session windows show a Chrome-style tab strip at the top. Each tab is an independent `claude --dangerously-skip-permissions` PTY running in the window's folder.
-- Tabs are labeled numerically by default (`1`, `2`, `3`, …) and numbers are never reused after a tab closes.
-- Right-click a tab chip → Rename to override the numeric label with a custom name.
+- Session windows show a Chrome-style tab strip at the top. Each tab is an independent PTY running in the window's folder; today the agent is either `claude --dangerously-skip-permissions` or `codex --yolo`.
+- Tabs are labelled by their agent. Default labels are `CLAUDE` / `CODEX`; the second-and-later tabs in a window also carry the per-window monotonic counter as a suffix (`CLAUDE 2`, `CODEX 3`). The counter is never reused after a tab closes.
+- Right-click a tab chip → Rename to override the default label with a custom name. Typing the literal default back in clears the custom name.
+- Codex chips are tinted teal so they read as distinct from the amber Claude chips. Active / hover / exited modifiers mirror across both palettes.
 - Each tab chip has a small hover close button (Chrome-style). Closing the last tab closes the whole session window.
-- The `+` button on the strip starts another independent Claude instance in the same folder.
+- The `+` button on the strip is dual-action: **left-click** starts another `claude --dangerously-skip-permissions` tab in the same folder; **right-click** starts a `codex --yolo` tab instead. The initial tab created when a folder is first launched is always Claude.
 - Minimize/restore still operate on the whole session window; PTYs for every tab keep running while minimized, and the source folder card stays orange.
 - Launching for (or reopening) a folder that already has a session window restores that window and focuses its active tab rather than creating a new one.
 - Narration sidebar ("What Was Made") toggles open via the header button. It shows a per-folder activity log for any Claude session that has run in that folder, plus a session summary. Tab open/close events are folded into the same folder log.
@@ -166,4 +167,5 @@ This avoids clipping the right edge of terminal content.
 - Hidden terminal hosts (`.terminal-host[hidden]` / inactive tabs) measure 0×0. Do not call `fitAddon.fit()` on them — only fit the active tab.
 - When switching tabs, refit the newly active tab after a layout frame; any fit applied to a host that is now hidden is stale and will mis-size the next time that tab becomes active.
 - `claude --dangerously-skip-permissions` is intentionally powerful. Any future UI that broadens launch behavior should make the target folder and command explicit.
+- The `agent` field in the `terminal:create` IPC payload is currently a two-value enum (`'claude'` | `'codex'`); `main.js` defaults unknown values to `'claude'`. Adding a third agent means updating `AGENT_COMMANDS` in `main.js` **and** the `agent === 'codex' ? ... : ...` ternaries in `renderer/app.js` (`buildTab`, `createTab`, `attachTabChip`, `defaultTabLabel`, and the exit handler). If a third agent is on the roadmap, normalize those into a single `KNOWN_AGENTS` set in one place.
 - `node-pty` rebuilds are fragile on Windows. If install fails, check `scripts/postinstall.js` and generated Visual Studio project files for Spectre-mitigation settings.
