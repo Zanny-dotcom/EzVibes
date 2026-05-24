@@ -99,14 +99,14 @@
 
       if (key === 'c') {
         if (inTerminal) {
-          const session = findSessionForElement(target);
-          if (!session) return;
-          const sel = session.term.getSelection();
+          const tab = findTabForElement(target);
+          if (!tab) return;
+          const sel = tab.term.getSelection();
           if (sel) {
             event.preventDefault();
             event.stopPropagation();
             await api.writeClipboard(sel);
-            session.term.clearSelection();
+            tab.term.clearSelection();
           }
           return;
         }
@@ -128,8 +128,8 @@
           event.stopPropagation();
           const text = await api.readClipboard();
           if (text) {
-            const session = findSessionForElement(target);
-            if (session) api.writeTerminal(session.id, text);
+            const tab = findTabForElement(target);
+            if (tab) api.writeTerminal(tab.id, text);
           }
           return;
         }
@@ -188,10 +188,10 @@
       const target = event.target;
       if (target && target.closest) {
         if (target.closest('.terminal-host')) {
-          const session = findSessionForElement(target);
-          if (session) {
+          const tab = findTabForElement(target);
+          if (tab) {
             const text = paths.map(quotePath).join(' ') + ' ';
-            api.writeTerminal(session.id, text);
+            api.writeTerminal(tab.id, text);
             return;
           }
         }
@@ -508,7 +508,7 @@
     terminalEl.addEventListener('contextmenu', (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const tab = findTabForTerminalHost(terminalEl) || firstTab;
+      const tab = findTabForElement(terminalEl) || firstTab;
       showTerminalContextMenu(tab, event.clientX, event.clientY);
     });
 
@@ -604,13 +604,6 @@
     return tab;
   }
 
-  function findTabForTerminalHost(hostEl) {
-    if (!hostEl) return null;
-    const id = hostEl.dataset && hostEl.dataset.tabId;
-    if (!id) return null;
-    return state.tabsById.get(id) || null;
-  }
-
   function activateTab(sessionWindow, tabId, options) {
     if (!sessionWindow) return null;
     const target = sessionWindow.tabs.find((t) => t.id === tabId);
@@ -640,7 +633,6 @@
       if (btn) btn.setAttribute('aria-selected', 'true');
     }
     sessionWindow.activeTabId = tabId;
-    sessionWindow.windowEl.dataset.sessionId = tabId;
 
     // Wait one or two animation frames so the now-visible host has a layout
     // box, then fit and resize the PTY. Never fit hidden hosts.
@@ -939,12 +931,12 @@
       .replace(/"/g, '&quot;');
   }
 
-  function findSessionForElement(element) {
+  function findTabForElement(element) {
     if (!element || !element.closest) return null;
-    const sessionContainer = element.closest('.folder-terminal');
-    if (!sessionContainer) return null;
-    const sessionId = sessionContainer.dataset.sessionId;
-    return state.tabsById.get(sessionId) || null;
+    const host = element.closest('.terminal-host');
+    if (!host) return null;
+    const tabId = host.dataset.tabId;
+    return state.tabsById.get(tabId) || null;
   }
 
   function insertTextIntoInput(input, text) {
