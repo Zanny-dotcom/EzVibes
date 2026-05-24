@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Claude Control Panel</title>
+    <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="window-title">Control Panel</div>
+        <div class="nav-buttons">
+          <button id="back-btn" class="icon-button" title="Back">‹</button>
+          <button id="up-btn" class="icon-button" title="Up">↑</button>
+          <button id="refresh-btn" class="icon-button" title="Refresh">↻</button>
+        </div>
+        <div id="path-bar" class="path-bar"></div>
+        <div class="search-wrap">
+          <input id="search-input" type="search" placeholder="Search folders" />
+        </div>
+      </header>
+
+      <main class="shell">
+        <aside class="sidebar">
+          <div class="sidebar-section-title">Places</div>
+          <div id="quick-paths"></div>
+        </aside>
+
+        <section class="content">
+          <div class="command-bar">
+            <button id="new-session-btn" class="command-button">Launch Claude Here</button>
+            <div id="folder-count" class="folder-count"></div>
+          </div>
+          <div id="grid" class="folder-grid"></div>
+        </section>
+      </main>
+    </div>
+
+    <div id="context-menu" class="context-menu" hidden></div>
+    <div id="session-layer" class="session-layer"></div>
+
+    <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+    <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
