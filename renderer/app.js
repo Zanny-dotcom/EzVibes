@@ -487,7 +487,7 @@
     const addTabBtnEl = document.createElement('button');
     addTabBtnEl.type = 'button';
     addTabBtnEl.className = 'folder-terminal-tab-add';
-    addTabBtnEl.title = 'New tab';
+    addTabBtnEl.title = 'Left-click: new Claude tab  —  Right-click: new Codex tab';
     addTabBtnEl.textContent = '+';
     tabStripEl.appendChild(addTabBtnEl);
 
@@ -523,7 +523,13 @@
 
     addTabBtnEl.addEventListener('click', (event) => {
       event.stopPropagation();
-      createTab(sessionWindow);
+      createTab(sessionWindow, { agent: 'claude' });
+    });
+
+    addTabBtnEl.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      createTab(sessionWindow, { agent: 'codex' });
     });
 
     terminalEl.addEventListener('contextmenu', (event) => {
