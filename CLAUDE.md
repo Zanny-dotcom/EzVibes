@@ -1,10 +1,10 @@
-# Claude Control Panel
+# EZvibes
 
 This file is the canonical source of truth for the project. Read it before any non-trivial change.
 
 ## Purpose
 
-Standalone Electron app at `C:\Users\Oskari\Documents\CP`. A simplified Explorer-style control panel for launching folder-scoped Claude sessions.
+Standalone Electron app at `C:\Users\Oskari\Documents\EZvibes`. A simplified Explorer-style launcher for folder-scoped Claude sessions.
 
 Core interaction:
 
@@ -34,7 +34,7 @@ Core interaction:
 
 - `package.json` — app scripts and dependencies.
 - `main.js` — Electron main process, directory listing IPC, PTY session lifecycle, system clipboard IPC, suppressed default menu.
-- `preload.js` — safe `contextBridge` API exposed as `window.controlPanel` (folder browsing, terminal IPC, clipboard, `webUtils.getPathForFile`).
+- `preload.js` — safe `contextBridge` API exposed as `window.ezvibes` (folder browsing, terminal IPC, clipboard, `webUtils.getPathForFile`).
 - `renderer/index.html` — app shell, narration-sidebar markup, script/style loading.
 - `renderer/app.js` — folder browser UI, context menu, session window + tab state, terminal popup lifecycle, narration sidebar logic. One IIFE, ~1200 lines.
 - `renderer/styles.css` — Explorer-like UI, folder visuals, orange minimized state, Genie-style animations, narration sidebar.
@@ -50,7 +50,7 @@ Core interaction:
 ## Launch
 
 ```powershell
-cd C:\Users\Oskari\Documents\CP
+cd C:\Users\Oskari\Documents\EZvibes
 npm start
 ```
 
@@ -64,7 +64,7 @@ npm install
 
 ## ezvibes Launcher
 
-CP can also be launched and pinned to the taskbar as a normal Windows app, surfaced by searching `ezvibes` in the Start menu.
+EZvibes can also be launched and pinned to the taskbar as a normal Windows app, surfaced by searching `ezvibes` in the Start menu.
 
 One-time setup:
 
@@ -73,15 +73,15 @@ One-time setup:
 ./startup/Install-EzvibesShortcuts.ps1
 ```
 
-Then press **Win**, type `ezvibes`, right-click the result, and choose **Pin to taskbar**. Re-running `Install-EzvibesShortcuts.ps1` will keep that pin in sync with the latest launcher + icon. Add `-CreateStartupShortcut` to also auto-launch CP at sign-in. See `startup/README.md` for details.
+Then press **Win**, type `ezvibes`, right-click the result, and choose **Pin to taskbar**. Re-running `Install-EzvibesShortcuts.ps1` will keep that pin in sync with the latest launcher + icon. Add `-CreateStartupShortcut` to also auto-launch EZvibes at sign-in. See `startup/README.md` for details.
 
 The shortcut targets `wscript.exe ezvibes.vbs`, which runs Electron without a console window flash.
 
-The main process sets Windows AppUserModelID `com.ezvibes.cp`, and the shortcut installer stamps the same ID onto Start Menu/taskbar shortcuts. `BrowserWindow` also uses `renderer/ezvibes.ico`, so launched windows group with the pinned Z folder shortcut instead of Electron's default identity.
+The main process sets Windows AppUserModelID `com.ezvibes.app`, and the shortcut installer stamps the same ID onto Start Menu/taskbar shortcuts. `BrowserWindow` also uses `renderer/ezvibes.ico`, so launched windows group with the pinned Z folder shortcut instead of Electron's default identity.
 
 ## Runtime Model
 
-Renderer code must not use Node/Electron directly. It talks to main through `window.controlPanel` from `preload.js`.
+Renderer code must not use Node/Electron directly. It talks to main through `window.ezvibes` from `preload.js`.
 
 Main IPC channels:
 
@@ -97,7 +97,7 @@ Main IPC channels:
 - `clipboard:read`
 - `clipboard:write`
 
-Preload API on `window.controlPanel`: `getInitialPath`, `getQuickPaths`, `listDirectory`, `createTerminal`, `writeTerminal`, `resizeTerminal`, `closeTerminal`, `onTerminalData`, `onTerminalExit`, `readClipboard`, `writeClipboard`, `getPathForFile`.
+Preload API on `window.ezvibes`: `getInitialPath`, `getQuickPaths`, `listDirectory`, `createTerminal`, `writeTerminal`, `resizeTerminal`, `closeTerminal`, `onTerminalData`, `onTerminalExit`, `readClipboard`, `writeClipboard`, `getPathForFile`.
 
 Terminal sessions are stored in `main.js` in a `Map` keyed by renderer-created `sessionId`. The renderer groups PTYs into session windows (one per folder), each holding one or more tabs. State lives in:
 
@@ -147,14 +147,14 @@ This avoids clipping the right edge of terminal content.
 ## Current UX
 
 - Starts at the user's Documents folder.
-- Sidebar has quick links for Home, Desktop, Documents, Downloads, and CP when present.
+- Sidebar has quick links for Home, Desktop, Documents, Downloads, and EZvibes when present.
 - Search filters visible folder/file entries.
 - Double-clicking a normal folder navigates into it.
 - Right-clicking a folder opens actions (`Launch Claude`, minimize/restore when a session window exists, rename, etc.).
 - Right-clicking a file has no real actions yet.
 - `Launch Claude Here` launches a Claude session window for the current directory.
 - Session windows show a Chrome-style tab strip at the top. Each tab is an independent PTY running in the window's folder; today the agent is either `claude --dangerously-skip-permissions` or `codex --yolo`.
-- Each session window also shows a small `.folder-name-label` chip on the yellow top strip, just left of the minimize/close buttons. It displays the folder basename (e.g., `CP`) so the user can tell which folder the window is rooted in; hovering shows the full path via the `title` attribute. The value is captured once at window creation.
+- Each session window also shows a small `.folder-name-label` chip on the yellow top strip, just left of the minimize/close buttons. It displays the folder basename (e.g., `EZvibes`) so the user can tell which folder the window is rooted in; hovering shows the full path via the `title` attribute. The value is captured once at window creation.
 - Tabs are labelled by their agent. Default labels are `CLAUDE` / `CODEX`; the second-and-later tabs in a window also carry the per-window monotonic counter as a suffix (`CLAUDE 2`, `CODEX 3`). The counter is never reused after a tab closes.
 - Right-click a tab chip → Rename to override the default label with a custom name. Typing the literal default back in clears the custom name.
 - Codex chips are tinted teal so they read as distinct from the amber Claude chips. Active / hover / exited modifiers mirror across both palettes.

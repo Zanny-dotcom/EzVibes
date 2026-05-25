@@ -1,11 +1,11 @@
 # ezvibes Launcher and Start Menu Shortcut
 
 ## Goal
-Make Claude Control Panel launchable like a normal Windows application: searchable from the Start menu as "ezvibes", pinnable to the taskbar, optionally auto-started at sign-in, and visually represented by a classic yellow folder icon with a black letter Z. Launching it must not flash a console window. This mirrors the existing pattern in `C:\Users\Oskari\Documents\terminal-emulator` (Retteli Terminaali).
+Make EZvibes launchable like a normal Windows application: searchable from the Start menu as "ezvibes", pinnable to the taskbar, optionally auto-started at sign-in, and visually represented by a classic yellow folder icon with a black letter Z. Launching it must not flash a console window. This mirrors the existing pattern in `C:\Users\Oskari\Documents\terminal-emulator` (Retteli Terminaali).
 
 ## Current State
-- CP is started today by running `npm start` in a terminal, which invokes `electron .` and inherits that terminal's window.
-- There is no Start Menu entry, taskbar pin, app icon, or .ico file for CP.
+- EZvibes is started today by running `npm start` in a terminal, which invokes `electron .` and inherits that terminal's window.
+- There is no Start Menu entry, taskbar pin, app icon, or .ico file for EZvibes.
 - `renderer/` contains only `app.js`, `index.html`, `styles.css` — no `favicon.ico` or `favicon.png`.
 - `package.json` has no `productName` icon wiring and no shortcut/build scripts. Electron uses its default icon on the running window and in the taskbar.
 - `scripts/` contains only `postinstall.js` (rebuilds `node-pty`).
@@ -16,7 +16,7 @@ Make Claude Control Panel launchable like a normal Windows application: searchab
   - `startup/Install-RetteliShortcuts.ps1` (creates Start Menu shortcut, refreshes taskbar pin, optional Startup folder shortcut).
 
 ## Target State
-- A user can press Win, type `ezvibes`, hit Enter, and CP opens with no console window flash.
+- A user can press Win, type `ezvibes`, hit Enter, and EZvibes opens with no console window flash.
 - A user can right-click the Start menu result and choose "Pin to taskbar"; after re-running the installer, that taskbar pin uses the Z folder icon and points at `wscript.exe ezvibes.vbs`.
 - A user can opt into auto-launch at sign-in by running the installer with `-CreateStartupShortcut`.
 - The shortcut's label is exactly `ezvibes` (lowercase). The icon is a classic warm-yellow manila folder with a bold black sans-serif "Z" centered on the folder face.
@@ -29,13 +29,13 @@ Make Claude Control Panel launchable like a normal Windows application: searchab
 - Multi-user / system-wide installation. Shortcuts are written under `%APPDATA%`, i.e. per-user.
 - Removing or unpinning previously-created shortcuts (no uninstall script). The user can delete `.lnk` files manually if needed.
 - Creating a new taskbar pin from scratch (Windows blocks this for security on modern versions). The script only *refreshes* an existing pin; the user must pin once via right-click from the Start menu result.
-- Changing the app's display name in `package.json` (`productName` stays `"Claude Control Panel"`). The shortcut's name is independent.
+- Changing the app's display name in `package.json` (`productName` stays `"EZvibes"`). The shortcut's name is independent.
 
 ## Components
 
 ### 1. Launcher — `ezvibes.vbs` (project root)
 - VBScript run via `wscript.exe` (not `cscript.exe`) so there is no console window.
-- Resolves the app directory from `WScript.ScriptFullName` so the launcher is path-portable (works even if `CP\` is moved or copied).
+- Resolves the app directory from `WScript.ScriptFullName` so the launcher is path-portable (works even if `EZvibes\` is moved or copied).
 - Verifies `node_modules\electron\dist\electron.exe` exists; if missing, shows a `MsgBox` telling the user to run `npm install` in the app directory and exits with code 1.
 - Sets `shell.CurrentDirectory` to the app dir, then calls `shell.Run "<electron.exe> ."` with `intWindowStyle=1` (normal window) and `bWaitOnReturn=False` (fire-and-forget).
 - File contents:
@@ -79,7 +79,7 @@ Make Claude Control Panel launchable like a normal Windows application: searchab
 - Prints the absolute output path on success.
 
 ### 3. Shortcut installer — `startup/Install-EzvibesShortcuts.ps1`
-- PowerShell script adapted from `terminal-emulator/startup/Install-RetteliShortcuts.ps1`, retargeted at CP.
+- PowerShell script adapted from `terminal-emulator/startup/Install-RetteliShortcuts.ps1`, retargeted at EZvibes.
 - Param: `[switch]$CreateStartupShortcut`.
 - Sets `$ErrorActionPreference = 'Stop'`.
 - Resolves:
@@ -126,13 +126,13 @@ User presses Win, types "ezvibes", hits Enter
   → Windows Search resolves to %APPDATA%\Microsoft\Windows\Start Menu\Programs\ezvibes.lnk
   → Shell launches the .lnk:
       target    = C:\Windows\System32\wscript.exe
-      arguments = "C:\Users\Oskari\Documents\CP\ezvibes.vbs"
-      workdir   = C:\Users\Oskari\Documents\CP
-      icon      = C:\Users\Oskari\Documents\CP\renderer\ezvibes.ico,0
+      arguments = "C:\Users\Oskari\Documents\EZvibes\ezvibes.vbs"
+      workdir   = C:\Users\Oskari\Documents\EZvibes
+      icon      = C:\Users\Oskari\Documents\EZvibes\renderer\ezvibes.ico,0
   → wscript.exe runs ezvibes.vbs (no console window)
   → VBS resolves appDir, verifies electron.exe exists
   → VBS sets CurrentDirectory and calls shell.Run "<electron.exe> ."
-  → Electron starts CP normally; the taskbar shows the .lnk's icon
+  → Electron starts EZvibes normally; the taskbar shows the .lnk's icon
 ```
 
 Installation flow:
@@ -161,7 +161,7 @@ Installation flow:
 - **Taskbar pin creation is not scriptable on modern Windows.** Pin refresh works only after the user pins once via right-click on the Start menu result. This is a Windows limitation, not a design choice; documented in CLAUDE.md and the installer's printed summary.
 - **Per-user only.** Shortcuts under `%APPDATA%` mean each Windows user has to run the installer themselves. This matches Retteli's behavior and is the right scope for a single-developer tool.
 - **`.ico` is checked into the repo.** This is intentional: installs don't need to regenerate, and the generator script + icon together act as source + artifact for easy review of any visual change.
-- **Repo-path coupling.** The shortcut bakes in the absolute path to `ezvibes.vbs`. If the CP folder is moved, the user must re-run the installer. The VBS itself remains path-portable (resolves its own location), so only the shortcuts need refreshing.
+- **Repo-path coupling.** The shortcut bakes in the absolute path to `ezvibes.vbs`. If the EZvibes folder is moved, the user must re-run the installer. The VBS itself remains path-portable (resolves its own location), so only the shortcuts need refreshing.
 - **No `package.json` changes.** This keeps the dev `npm start` workflow untouched and avoids muddying the existing scripts.
 - **PNG-in-ICO format support.** Targets Vista+, which is fine for any system running modern Electron. The generator does *not* fall back to BMP-in-ICO for older systems because none are in scope.
 - **Window icon vs shortcut icon.** The shortcut's icon binding controls what shows in the taskbar for the running app *only because Electron's default AppUserModelID gets associated with the shortcut on launch*. If we later notice the icon reverts (e.g., when launched via a different code path), the fix is to set `app.setAppUserModelId('ezvibes')` in `main.js` and rebuild the shortcut — out of scope here but worth recording.

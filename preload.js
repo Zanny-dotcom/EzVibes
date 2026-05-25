@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
-contextBridge.exposeInMainWorld('controlPanel', {
+contextBridge.exposeInMainWorld('ezvibes', {
   getInitialPath: () => ipcRenderer.invoke('app:initial-path'),
   getQuickPaths: () => ipcRenderer.invoke('app:quick-paths'),
   listDirectory: (folderPath) => ipcRenderer.invoke('fs:list-directory', folderPath),

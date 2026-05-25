@@ -1,5 +1,5 @@
 (function () {
-  const api = window.controlPanel;
+  const api = window.ezvibes;
   const state = {
     currentPath: '',
     parentPath: '',

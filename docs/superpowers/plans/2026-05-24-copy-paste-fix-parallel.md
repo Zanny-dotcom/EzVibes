@@ -6,7 +6,7 @@
 
 **Architecture:** Three files change in parallel under a Phase 0 contract:
 - `main.js` owns the Electron Edit menu (one accelerator: Ctrl+V), the native right-click handler for editable elements, and the clipboard IPC handlers.
-- `preload.js` owns the clipboard bridge surfaced as `controlPanel.readClipboard()` / `controlPanel.writeClipboard(text)`.
+- `preload.js` owns the clipboard bridge surfaced as `ezvibes.readClipboard()` / `ezvibes.writeClipboard(text)`.
 - `renderer/app.js` owns the xterm.js custom-key handler (Ctrl+Shift+C / Ctrl+Shift+V) and the terminal right-click context menu (reusing the existing `.context-menu` DOM/CSS).
 
 **Tech stack:** Electron 33 (`clipboard` module, `Menu`, `webContents.on('context-menu')`), node-pty 1.1, `@xterm/xterm` 5.5 (`term.attachCustomKeyEventHandler`, `term.getSelection()`, `term.selectAll()`), vanilla JS/HTML/CSS.
@@ -31,11 +31,11 @@ Three independent file edits with a single locked contract → zero merge risk. 
 ### Preload public API (renderer consumes)
 
 ```javascript
-controlPanel.readClipboard()           // → Promise<string>
-controlPanel.writeClipboard(text)      // → Promise<void>
+ezvibes.readClipboard()           // → Promise<string>
+ezvibes.writeClipboard(text)      // → Promise<void>
 ```
 
-These are ADDITIONS to the existing `controlPanel` object — do not rename or restructure existing methods.
+These are ADDITIONS to the existing `ezvibes` object — do not rename or restructure existing methods.
 
 ### Application menu (main owns)
 
@@ -109,7 +109,7 @@ Reuses the existing `#context-menu` DOM element and `.context-menu*` CSS via the
 ### Agent B — `preload.js`
 
 **Scope:**
-- Extend the existing `controlPanel` object exposed via `contextBridge.exposeInMainWorld` with two methods: `readClipboard` and `writeClipboard`.
+- Extend the existing `ezvibes` object exposed via `contextBridge.exposeInMainWorld` with two methods: `readClipboard` and `writeClipboard`.
 - Do not touch any existing method.
 
 **Exact additions** (inside the existing object literal, place after `closeTerminal`):

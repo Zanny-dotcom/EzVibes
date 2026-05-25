@@ -21,7 +21,7 @@ Only re-run this if you edit the generator script and want to update the icon.
 This:
 
 - Writes `ezvibes.lnk` to your user Start Menu (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\`). Windows Search indexes this, so typing `ezvibes` in the Start menu surfaces it.
-- Refreshes an existing taskbar pin (renaming a CP-owned stale `Electron.lnk` if present) so the pin targets `wscript.exe ezvibes.vbs` with the Z folder icon.
+- Refreshes an existing taskbar pin (renaming an EZvibes-owned stale `Electron.lnk` if present) so the pin targets `wscript.exe ezvibes.vbs` with the Z folder icon.
 - Refreshes Explorer's icon cache via `ie4uinit.exe -show`.
 
 ## Auto-launch at sign-in

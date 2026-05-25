@@ -11,7 +11,7 @@ Add a small folder-name label to the top bar of every session window so the user
 
 ## Target State
 - A `.folder-name-label` element appears inside `.folder-terminal-tab`, immediately before `.session-controls` (so visually: `… [ folder name ] [_][x]` flush right).
-- Text content is the folder's basename (e.g., `CP`).
+- Text content is the folder's basename (e.g., `EZvibes`).
 - `title` attribute is the full folder path, so the user can hover for the absolute path.
 - Styling matches the existing yellow tab-strip language: dark text on a faint cream background, small rounded rectangle, similar height to the session-control buttons.
 - Long folder names truncate with ellipsis (`max-width` + `text-overflow: ellipsis`).

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to drive this. The execution model is *parallel sub-agents under a locked contract*, not sequential tasks. Steps use checkbox (`- [ ]`) syntax.
 
-**Goal:** Add a top-right toggle-able contextual narration sidebar to Claude Control Panel that renders `state.narrationByPath[state.currentPath]` — showing per-folder Claude activity (session start, user prompts, heuristic agent/plan/completion signals, and session exit) without disturbing the existing terminal session pipeline.
+**Goal:** Add a top-right toggle-able contextual narration sidebar to EZvibes that renders `state.narrationByPath[state.currentPath]` — showing per-folder Claude activity (session start, user prompts, heuristic agent/plan/completion signals, and session exit) without disturbing the existing terminal session pipeline.
 
 **Architecture:** Three renderer files (`renderer/index.html`, `renderer/styles.css`, `renderer/app.js`) change in parallel under a Phase 0 contract that pins every DOM id, CSS class, helper signature, narration shape field, and event-kind string. Each file is owned by exactly one sub-agent — no two agents touch the same file, so they run truly concurrently in the same working tree (no worktrees needed). Narration state lives in renderer memory only (no persistence in v1). The sidebar always reads from `state.currentPath`; renders fire on `navigateTo`, `addNarrationEvent`, `setNarrationSummary`, and toggle clicks.
 
@@ -644,7 +644,7 @@ Toggle-able right sidebar that shows per-folder Claude activity:
 ### Template — Agent A (HTML)
 
 ```
-You are editing C:\Users\Oskari\Documents\CP\renderer\index.html ONLY. Use the Edit tool. Do not modify any other file. Do not stage or commit.
+You are editing C:\Users\Oskari\Documents\EZvibes\renderer\index.html ONLY. Use the Edit tool. Do not modify any other file. Do not stage or commit.
 
 ultrathink — reason carefully about exact insertion points and indentation. Match the file's existing 2-space indent.
 
@@ -682,7 +682,7 @@ When done, reply with:
 ### Template — Agent B (CSS)
 
 ```
-You are editing C:\Users\Oskari\Documents\CP\renderer\styles.css ONLY. Use the Edit tool. Do not modify any other file. Do not stage or commit.
+You are editing C:\Users\Oskari\Documents\EZvibes\renderer\styles.css ONLY. Use the Edit tool. Do not modify any other file. Do not stage or commit.
 
 ultrathink — reason carefully about cascade. Before editing, read the entire file and confirm that the existing .topbar, .shell, .folder-grid, and .folder-terminal rules will remain valid after your changes.
 
@@ -709,7 +709,7 @@ When done, reply with:
 ### Template — Agent C (JS)
 
 ```
-You are editing C:\Users\Oskari\Documents\CP\renderer\app.js ONLY. Use the Edit tool, one focused Edit per change. Do not modify any other file. Do not stage or commit.
+You are editing C:\Users\Oskari\Documents\EZvibes\renderer\app.js ONLY. Use the Edit tool, one focused Edit per change. Do not modify any other file. Do not stage or commit.
 
 ultrathink — this is the largest slice. The whole file lives inside an IIFE; all new functions must be defined inside it. Reason carefully about each call site so the existing terminal session pipeline keeps working. Pay particular attention to:
 - `<main class="shell">` has no id — use `document.querySelector('main.shell')`.
@@ -778,4 +778,4 @@ When done:
 ## When *not* to use this orchestration
 
 - If you (or the user) want to extend the v1 to LLM-summarized events or `subagent_type`-aware structured events, write a fresh plan — the architecture recommendation in the original spec stands: keep the UI consuming structured `addNarrationEvent(path, kind, text)` calls; only the event SOURCE changes.
-- If persistence is requested, add an IPC layer (main owns `%APPDATA%\claude-control-panel\narration.json` with atomic writes; renderer sends updates) — that is a separate plan, not a Phase-1 task here.
+- If persistence is requested, add an IPC layer (main owns `%APPDATA%\ezvibes\narration.json` with atomic writes; renderer sends updates) — that is a separate plan, not a Phase-1 task here.

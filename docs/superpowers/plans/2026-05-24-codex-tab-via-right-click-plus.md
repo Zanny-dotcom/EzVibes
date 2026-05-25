@@ -530,11 +530,11 @@ git commit -m "Codex step 6: tinted codex chip variant"
 - [ ] **Step 1: Launch the app**
 
 Run: `npm start`
-Expected: the Claude Control Panel window opens at the user's Documents folder.
+Expected: the EZvibes window opens at the user's Documents folder.
 
 - [ ] **Step 2: Verify first-tab default label**
 
-Double-click any folder (e.g. `CP`). A session window appears, with one tab chip labelled exactly `CLAUDE`. The chip uses the existing amber color. A claude session starts in the terminal.
+Double-click any folder (e.g. `EZvibes`). A session window appears, with one tab chip labelled exactly `CLAUDE`. The chip uses the existing amber color. A claude session starts in the terminal.
 
 - [ ] **Step 3: Verify left-click `+` adds another claude tab**
 

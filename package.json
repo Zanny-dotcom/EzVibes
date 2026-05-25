@@ -1,8 +1,8 @@
 {
-  "name": "claude-control-panel",
-  "productName": "Claude Control Panel",
+  "name": "ezvibes",
+  "productName": "EZvibes",
   "version": "0.1.0",
-  "description": "Explorer-style control panel for launching folder-scoped Claude terminal sessions.",
+  "description": "Explorer-style launcher for folder-scoped Claude / Codex terminal sessions.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",

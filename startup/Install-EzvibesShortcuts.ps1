@@ -5,7 +5,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).ProviderPath
-$appUserModelId = 'com.ezvibes.cp'
+$appUserModelId = 'com.ezvibes.app'
 $launcherPath = Join-Path $repoRoot 'ezvibes.vbs'
 $iconPath = Join-Path $repoRoot 'renderer\ezvibes.ico'
 

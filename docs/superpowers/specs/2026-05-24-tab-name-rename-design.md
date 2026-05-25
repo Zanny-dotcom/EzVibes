@@ -6,7 +6,7 @@ Move the folder-name from inside the popup header onto the small "tab" that stic
 ## Current State
 - `.folder-terminal::before` is a CSS pseudo-element that draws a yellow tab nubbin (190px wide, 34px tall) above the popup. It is decorative only — no text, no interaction.
 - `.folder-terminal-tab` is a 70px-tall row inside the popup. It holds:
-  - `.session-title` = folder name (e.g., `CP`)
+  - `.session-title` = folder name (e.g., `EZvibes`)
   - `.session-subtitle` = `claude --dangerously-skip-permissions`
   - `.session-controls` = minimize/close buttons
 - `.terminal-pocket` has a 3px dark border + 8px padding around the xterm host.

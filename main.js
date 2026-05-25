@@ -5,7 +5,7 @@ const os = require('os');
 const { execSync } = require('child_process');
 const pty = require('node-pty');
 
-const APP_USER_MODEL_ID = 'com.ezvibes.cp';
+const APP_USER_MODEL_ID = 'com.ezvibes.app';
 const APP_ICON_PATH = path.join(__dirname, 'renderer', 'ezvibes.ico');
 const sessions = new Map();
 
@@ -125,7 +125,7 @@ function quickPaths() {
     ['Desktop', path.join(home, 'Desktop')],
     ['Documents', path.join(home, 'Documents')],
     ['Downloads', path.join(home, 'Downloads')],
-    ['CP', path.join(home, 'Documents', 'CP')],
+    ['EZvibes', path.join(home, 'Documents', 'EZvibes')],
   ];
   return candidates
     .filter(([, folder]) => fs.existsSync(folder))
@@ -140,7 +140,7 @@ function createWindow() {
     minHeight: 640,
     backgroundColor: '#101312',
     show: false,
-    title: 'Claude Control Panel',
+    title: 'EZvibes',
     icon: APP_ICON_PATH,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

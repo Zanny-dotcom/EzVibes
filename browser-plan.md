@@ -8,7 +8,7 @@
 
 **Tech Stack:** Electron 33, vanilla JS, `<webview>` tag (built-in), Brave Search as default landing/search engine. No new npm dependencies.
 
-**Reference:** `browser.md` (sibling project Terminal-Emulator). This plan adapts that pattern to CCP's single-IIFE renderer and single-file `main.js`.
+**Reference:** `browser.md` (sibling project Terminal-Emulator). This plan adapts that pattern to EZvibes's single-IIFE renderer and single-file `main.js`.
 
 **Out of scope for MVP (explicit follow-ups at end):** persistence of tab URLs across app restart; keyboard chord forwarding from inside the guest; DevTools toggle; per-tab session isolation; full `AgentProfile` refactor (audit recommendation).
 
@@ -21,7 +21,7 @@
 
 ## File Structure
 
-This plan keeps with CCP's existing structure (single `main.js`, single renderer IIFE). No new files are introduced — all changes are in-place, demarcated by `// === BROWSER ===` section comments so the new code is greppable and removable if the feature is rolled back.
+This plan keeps with EZvibes's existing structure (single `main.js`, single renderer IIFE). No new files are introduced — all changes are in-place, demarcated by `// === BROWSER ===` section comments so the new code is greppable and removable if the feature is rolled back.
 
 | File | Role after this plan |
 |---|---|
@@ -45,7 +45,7 @@ This plan keeps with CCP's existing structure (single `main.js`, single renderer
 **Why:** `<webview>` is disabled by default in Electron since v5. Without `webviewTag: true`, the renderer's `<webview>` element renders as an inert div and `will-attach-webview` never fires. This must land first or nothing else in the plan works.
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\main.js:115-131` (createWindow webPreferences block)
+- Modify: `C:\Users\Oskari\Documents\EZvibes\main.js:115-131` (createWindow webPreferences block)
 
 - [ ] **Step 1: Add `webviewTag: true` to webPreferences**
 
@@ -60,7 +60,7 @@ function createWindow() {
     minHeight: 640,
     backgroundColor: '#101312',
     show: false,
-    title: 'Claude Control Panel',
+    title: 'EZvibes',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -77,7 +77,7 @@ function createWindow() {
 - [ ] **Step 2: Manual verification**
 
 ```powershell
-cd C:\Users\Oskari\Documents\CP
+cd C:\Users\Oskari\Documents\EZvibes
 npm start
 ```
 
@@ -103,7 +103,7 @@ git commit -m "main: enable webviewTag for browser-tab feature"
 **Why:** Both the URL bar and the popup handler need to reject `javascript:`/`file:`/`data:` URLs. Reusable helpers keep the security boundary in one place.
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\main.js` (add helpers near the top, after the `AGENT_COMMANDS` block at line 38-45)
+- Modify: `C:\Users\Oskari\Documents\EZvibes\main.js` (add helpers near the top, after the `AGENT_COMMANDS` block at line 38-45)
 
 - [ ] **Step 1: Add `validateUrl` and `canonicalizeUrlOrSearch`**
 
@@ -166,7 +166,7 @@ git commit -m "main: add URL validation helpers (http/https allowlist + bare-hos
 ## Task 3: Register the validation IPC handlers
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\main.js` (add two `ipcMain.handle` calls inside `registerIpc`, after the `clipboard:write` handler at line 238)
+- Modify: `C:\Users\Oskari\Documents\EZvibes\main.js` (add two `ipcMain.handle` calls inside `registerIpc`, after the `clipboard:write` handler at line 238)
 
 - [ ] **Step 1: Add IPC handlers**
 
@@ -190,9 +190,9 @@ In `registerIpc(mainWindow)`, insert after `ipcMain.handle('clipboard:write', ..
 After `preload.js` is updated (Task 5) and `npm start` runs, in DevTools console:
 
 ```js
-await window.controlPanel.browserValidateUrl('example.com')
+await window.ezvibes.browserValidateUrl('example.com')
 // → { ok: true, url: 'https://example.com/' }
-await window.controlPanel.browserCanonicalizeOrSearch('claude code agents')
+await window.ezvibes.browserCanonicalizeOrSearch('claude code agents')
 // → { ok: true, url: 'https://search.brave.com/search?q=claude%20code%20agents' }
 ```
 
@@ -212,7 +212,7 @@ git commit -m "main: add browser:validate-url and browser:canonicalize-or-search
 **Why:** When a `<webview>` guest is created, the renderer doesn't know main's `webContentsId` ahead of time, and main doesn't know which renderer-side `tabId` owns which guest. A bidirectional Map populated at `dom-ready` time bridges this so future per-guest features (popup forwarding, key forwarding) can resolve a `tabId`.
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\main.js` (add Maps near top + IPC listeners in `registerIpc`)
+- Modify: `C:\Users\Oskari\Documents\EZvibes\main.js` (add Maps near top + IPC listeners in `registerIpc`)
 
 - [ ] **Step 1: Add module-scoped Maps**
 
@@ -272,16 +272,16 @@ git commit -m "main: add guest webContents↔tabId mapping + register/unregister
 ## Task 5: Expose 5 new methods on the preload bridge
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\preload.js`
+- Modify: `C:\Users\Oskari\Documents\EZvibes\preload.js`
 
 - [ ] **Step 1: Add methods to the contextBridge**
 
-Replace the existing `contextBridge.exposeInMainWorld('controlPanel', { ... })` block with the version below (additions only — existing methods unchanged):
+Replace the existing `contextBridge.exposeInMainWorld('ezvibes', { ... })` block with the version below (additions only — existing methods unchanged):
 
 ```js
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
-contextBridge.exposeInMainWorld('controlPanel', {
+contextBridge.exposeInMainWorld('ezvibes', {
   getInitialPath: () => ipcRenderer.invoke('app:initial-path'),
   getQuickPaths: () => ipcRenderer.invoke('app:quick-paths'),
   listDirectory: (folderPath) => ipcRenderer.invoke('fs:list-directory', folderPath),
@@ -326,13 +326,13 @@ npm start
 In DevTools console:
 
 ```js
-typeof window.controlPanel.browserValidateUrl
+typeof window.ezvibes.browserValidateUrl
 // → 'function'
-await window.controlPanel.browserValidateUrl('example.com')
+await window.ezvibes.browserValidateUrl('example.com')
 // → { ok: true, url: 'https://example.com/' }
-await window.controlPanel.browserValidateUrl('javascript:alert(1)')
+await window.ezvibes.browserValidateUrl('javascript:alert(1)')
 // → { ok: false }
-await window.controlPanel.browserCanonicalizeOrSearch('claude code')
+await window.ezvibes.browserCanonicalizeOrSearch('claude code')
 // → { ok: true, url: 'https://search.brave.com/search?q=claude%20code' }
 ```
 
@@ -350,7 +350,7 @@ git commit -m "preload: expose 5 browser:* IPC methods to renderer"
 **Why:** Tabs currently carry only `agent` (`'claude' | 'codex'`). We need a parallel `type` field (`'terminal' | 'browser'`) so `createTab` can dispatch to two different build/close paths. Existing terminal tabs default to `type: 'terminal'`. While we're modifying `createTab`, fix the orphan-chip-on-failure bug surfaced in the audit by introducing a unified rollback path that the new browser-tab path will reuse.
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\renderer\app.js` (lines around 658-680 `buildTab`, 779-832 `createTab`)
+- Modify: `C:\Users\Oskari\Documents\EZvibes\renderer\app.js` (lines around 658-680 `buildTab`, 779-832 `createTab`)
 
 - [ ] **Step 1: Add `type` to `buildTab`**
 
@@ -437,7 +437,7 @@ async function createTab(sessionWindow, options) {
     state.tabsById.set(tab.id, tab);
     attachTabChip(sessionWindow, tab, { active: false });
 
-    const result = await window.controlPanel.createTerminal({
+    const result = await window.ezvibes.createTerminal({
       sessionId: tab.id,
       cwd: sessionWindow.folderPath,
       agent,
@@ -486,7 +486,7 @@ git commit -m "renderer: add tab.type field + rollback on createTerminal failure
 **Why:** When the user switches from a terminal tab to a browser tab (or back), the previously-active *opposite-type* panel must be hidden. Each per-type `activate` only sweeps its own kind, so without a generic sweep both panels would remain visible during a cross-type switch.
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\renderer\app.js` (the `activateTab` function around lines 690-734)
+- Modify: `C:\Users\Oskari\Documents\EZvibes\renderer\app.js` (the `activateTab` function around lines 690-734)
 
 - [ ] **Step 1: Add the type-agnostic sweep**
 
@@ -529,7 +529,7 @@ git commit -m "renderer: add cross-type hide-others sweep in activateTab"
 ## Task 8: Add the browser-tab build/activate/close functions
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\renderer\app.js` (add a new section, ideally right after the existing terminal-tab functions around line 800)
+- Modify: `C:\Users\Oskari\Documents\EZvibes\renderer\app.js` (add a new section, ideally right after the existing terminal-tab functions around line 800)
 
 - [ ] **Step 1: Add `LANDING_URL` and Maps**
 
@@ -603,7 +603,7 @@ function closeBrowserTab(tab) {
   const panel = browserPanels.get(tab.id);
   const webview = browserWebviews.get(tab.id);
   if (webview) {
-    try { window.controlPanel.browserUnregisterGuest({ tabId: tab.id }); } catch (_) {}
+    try { window.ezvibes.browserUnregisterGuest({ tabId: tab.id }); } catch (_) {}
   }
   if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
   browserPanels.delete(tab.id);
@@ -635,7 +635,7 @@ function wireBrowserToolbar(tabId, panel, webview) {
   urlBar.addEventListener('keydown', async (e) => {
     if (e.key !== 'Enter') return;
     e.preventDefault();
-    const result = await window.controlPanel.browserCanonicalizeOrSearch(urlBar.value);
+    const result = await window.ezvibes.browserCanonicalizeOrSearch(urlBar.value);
     if (result && result.ok) {
       try { webview.loadURL(result.url); } catch (_) {}
     }
@@ -675,7 +675,7 @@ function wireBrowserWebviewEvents(tabId, webview) {
     refreshBrowserNavState(tabId);
     try {
       const id = webview.getWebContentsId();
-      window.controlPanel.browserRegisterGuest({ tabId, webContentsId: id });
+      window.ezvibes.browserRegisterGuest({ tabId, webContentsId: id });
     } catch (_) {}
   });
   webview.addEventListener('page-title-updated', (e) => {
@@ -733,7 +733,7 @@ git commit -m "renderer: add browser tab build/activate/close + toolbar + webvie
 ## Task 9: Wire browser-tab dispatch into the existing tab creation entry points
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\renderer\app.js` (existing `createTab`, `activateTab`, `closeTab` paths)
+- Modify: `C:\Users\Oskari\Documents\EZvibes\renderer\app.js` (existing `createTab`, `activateTab`, `closeTab` paths)
 
 - [ ] **Step 1: Add a `createBrowserTab` entry point**
 
@@ -786,7 +786,7 @@ function closeTab(tabId, opts) {
     // which is type-agnostic and stays as-is.
   } else {
     // Existing terminal-tab teardown:
-    try { window.controlPanel.closeTerminal(tab.id); } catch (_) {}
+    try { window.ezvibes.closeTerminal(tab.id); } catch (_) {}
     // ... existing logic, unchanged
   }
 
@@ -813,7 +813,7 @@ git commit -m "renderer: dispatch by tab.type in activate/close + add createBrow
 **Why:** This is the discoverable trigger for browser tabs (and the audit-recommended fix for the undiscoverable right-click on `+`). Existing left-click=Claude / right-click=Codex muscle-memory is preserved. The chevron exposes all three options explicitly. Middle-click on `+` is added as a power-user shortcut for Browser.
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\renderer\app.js` (around line 542-590 — the tab-strip + `+` button construction)
+- Modify: `C:\Users\Oskari\Documents\EZvibes\renderer\app.js` (around line 542-590 — the tab-strip + `+` button construction)
 
 - [ ] **Step 1: Build the chevron + dropdown alongside `+`**
 
@@ -969,15 +969,15 @@ git commit -m "renderer: add split-button chevron + dropdown for Claude/Codex/Br
 ## Task 11: Subscribe to popup-from-guest IPC
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\renderer\app.js` (near the IIFE bootstrap)
+- Modify: `C:\Users\Oskari\Documents\EZvibes\renderer\app.js` (near the IIFE bootstrap)
 
 - [ ] **Step 1: Add the subscriber once at boot**
 
-Near the renderer bootstrap (where other `window.controlPanel.on...` subscriptions live, or at the bottom of the IIFE), add:
+Near the renderer bootstrap (where other `window.ezvibes.on...` subscriptions live, or at the bottom of the IIFE), add:
 
 ```js
 // === BROWSER ===
-window.controlPanel.onBrowserNewTabFromPopup((payload) => {
+window.ezvibes.onBrowserNewTabFromPopup((payload) => {
   if (!payload || typeof payload.url !== 'string') return;
   // Route popup to the most-recently-focused session window. Fallback: first window.
   const sessionWindow = state.lastFocusedSessionWindow || state.windowsByPath.values().next().value;
@@ -1003,7 +1003,7 @@ git commit -m "renderer: subscribe to browser:new-tab-from-popup IPC; route to a
 **Why:** This is the security chokepoint. Without these hooks, a renderer-side `<webview>` could open with `nodeIntegration: true` and the guest would have Node.js access — full system compromise from any page.
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\main.js` (inside `registerIpc(mainWindow)`, after the IPC handlers added in Tasks 3-4)
+- Modify: `C:\Users\Oskari\Documents\EZvibes\main.js` (inside `registerIpc(mainWindow)`, after the IPC handlers added in Tasks 3-4)
 
 - [ ] **Step 1: Add the attach hooks**
 
@@ -1068,7 +1068,7 @@ git commit -m "main: install will-attach-webview + did-attach-webview guest hard
 ## Task 13: Styles — panel, toolbar, webview, error overlay, chevron dropdown, glyphs
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\renderer\styles.css` (append to end of file)
+- Modify: `C:\Users\Oskari\Documents\EZvibes\renderer\styles.css` (append to end of file)
 
 - [ ] **Step 1: Append the browser-tab styles**
 
@@ -1263,7 +1263,7 @@ git commit -m "styles: browser panel/toolbar/webview/error + chevron dropdown + 
 **Why:** CLAUDE.md is the canonical project doc per the file's own header. Future you (or any other agent) must learn the new feature from this file.
 
 **Files:**
-- Modify: `C:\Users\Oskari\Documents\CP\CLAUDE.md`
+- Modify: `C:\Users\Oskari\Documents\EZvibes\CLAUDE.md`
 
 - [ ] **Step 1: Update the "Stack" section**
 
@@ -1389,7 +1389,7 @@ git commit -m "fix: <specific tweak from verification>"
 
 The following are explicitly NOT in this plan. Each warrants its own plan when prioritized.
 
-1. **Tab persistence across restart** (`docs/superpowers/plans/YYYY-MM-DD-tab-persistence.md`) — Serialize `state.windowsByPath` (folder paths + per-tab `{type, agent, customName, browserUrl}`) on every change to `~/.claudeControlPanel/state.json`; restore on app boot. Closes the audit finding that "no persistence is now table-stakes".
+1. **Tab persistence across restart** (`docs/superpowers/plans/YYYY-MM-DD-tab-persistence.md`) — Serialize `state.windowsByPath` (folder paths + per-tab `{type, agent, customName, browserUrl}`) on every change to `~/.ezvibes/state.json`; restore on app boot. Closes the audit finding that "no persistence is now table-stakes".
 2. **Guest keyboard chord forwarding** — Install `before-input-event` on each guest's WebContents in `did-attach-webview`. Forward Ctrl+T/W/Tab/1-9 as `browser:guest-key-tab-action` IPC; Ctrl+L/Alt+Arrow/Ctrl+R as `browser:guest-key-content` IPC. Required if/when the app gains global tab shortcuts.
 3. **AgentProfile object refactor** — Replace the `agent` string enum (`'claude' | 'codex'`) and the parallel `type` enum (`'terminal' | 'browser'`) with a single registry of `AgentProfile { id, kind, command?, label, accent, glyph, defaultFlags }`. Collapses the 5-site update burden CLAUDE.md flags and the tab-type branch added by this plan.
 4. **Per-tab session isolation** — Optionally use `partition="browser-tabs-${tabId}"` instead of the shared `persist:browser-tabs`. Cost: lose cross-tab session sharing (login on one tab doesn't carry to another). Decide explicitly.
@@ -1402,7 +1402,7 @@ The following are explicitly NOT in this plan. Each warrants its own plan when p
 
 ## Self-Review Notes
 
-- **Spec coverage**: Every section of `browser.md` is either implemented (panel + webview + toolbar + IPC + hardening + popup forwarding + URL validation), explicitly deferred (persistence, key forwarding, hot-reload cleanup), or noted as N/A for CCP's simpler architecture (no feature module system → no `registerType`; no shared config → no `tabState` persistence in MVP).
+- **Spec coverage**: Every section of `browser.md` is either implemented (panel + webview + toolbar + IPC + hardening + popup forwarding + URL validation), explicitly deferred (persistence, key forwarding, hot-reload cleanup), or noted as N/A for EZvibes's simpler architecture (no feature module system → no `registerType`; no shared config → no `tabState` persistence in MVP).
 - **Placeholder scan**: No "TODO" / "implement later" / "fill in details" remain. All code blocks contain real code. All file paths are absolute. Helper function names (`logNarration`, `attachTabChip`, `activateTab`, `state.tabsById`) reference the actual symbols confirmed in the audit's code-recon (lines 10, 222-240, 601-655, 690-770).
 - **Type consistency**: `tab.type` is `'terminal' | 'browser'` everywhere (Tasks 6, 7, 8, 9). `tab.agent` is `'claude' | 'codex'` everywhere and is ignored on browser tabs. The IPC channel name `browser:new-tab-from-popup` matches between main (Task 12), preload (Task 5), and renderer subscriber (Task 11). The partition string `persist:browser-tabs` is identical in renderer attribute (Task 8) and main clamp (Task 12).
 - **Audit-finding crossover**: The plan opportunistically addresses 4 audit findings (split-button discoverability, rapid-click race, orphan-chip-on-failure, color-only differentiation) because they live in the same files we are already touching. Other audit findings (ARIA tabs pattern, OSC 9 capture, `app.on('activate')` IPC double-register) are explicitly deferred to keep this plan scoped.
