@@ -17,13 +17,33 @@ if (-not (Test-Path -LiteralPath $iconPath)) {
   throw "Icon not found: $iconPath. Run scripts/build-ezvibes-icon.ps1 first."
 }
 
-if (-not ([System.Management.Automation.PSTypeName]'Ezvibes.ShellShortcutProperties').Type) {
+if (-not ([System.Management.Automation.PSTypeName]'Ezvibes.ShellLinkShortcutProperties').Type) {
   Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 
 namespace Ezvibes {
-  public static class ShellShortcutProperties {
+  public static class ShellLinkShortcutProperties {
+    private const uint STGM_READWRITE = 0x00000002;
+
+    [ComImport]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    [Guid("0000010B-0000-0000-C000-000000000046")]
+    private interface IPersistFile {
+      [PreserveSig]
+      int GetClassID(out Guid pClassID);
+      [PreserveSig]
+      int IsDirty();
+      [PreserveSig]
+      int Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+      [PreserveSig]
+      int Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, bool fRemember);
+      [PreserveSig]
+      int SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+      [PreserveSig]
+      int GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
+    }
+
     [ComImport]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     [Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
@@ -62,23 +82,15 @@ namespace Ezvibes {
     [DllImport("ole32.dll")]
     private static extern int PropVariantClear(ref PROPVARIANT propVariant);
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    private static extern int SHGetPropertyStoreFromParsingName(
-      [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
-      IntPtr zero,
-      uint flags,
-      ref Guid riid,
-      out IntPtr propertyStore);
-
     public static void SetAppUserModelId(string shortcutPath, string appUserModelId) {
-      Guid propertyStoreId = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
-      IntPtr propertyStorePtr;
-      int hr = SHGetPropertyStoreFromParsingName(shortcutPath, IntPtr.Zero, 2, ref propertyStoreId, out propertyStorePtr);
-      Marshal.ThrowExceptionForHR(hr);
-
-      var propertyStore = (IPropertyStore)Marshal.GetTypedObjectForIUnknown(propertyStorePtr, typeof(IPropertyStore));
-
+      Type shellLinkType = Type.GetTypeFromCLSID(new Guid("00021401-0000-0000-C000-000000000046"));
+      object shellLink = Activator.CreateInstance(shellLinkType);
       try {
+        var persistFile = (IPersistFile)shellLink;
+        int hr = persistFile.Load(shortcutPath, STGM_READWRITE);
+        Marshal.ThrowExceptionForHR(hr);
+
+        var propertyStore = (IPropertyStore)shellLink;
         var appIdKey = new PROPERTYKEY(new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);
 
         PROPVARIANT propVariant = new PROPVARIANT();
@@ -91,11 +103,16 @@ namespace Ezvibes {
 
           hr = propertyStore.Commit();
           Marshal.ThrowExceptionForHR(hr);
+
+          hr = persistFile.Save(shortcutPath, true);
+          Marshal.ThrowExceptionForHR(hr);
         } finally {
           PropVariantClear(ref propVariant);
         }
       } finally {
-        Marshal.Release(propertyStorePtr);
+        if (shellLink != null && Marshal.IsComObject(shellLink)) {
+          Marshal.FinalReleaseComObject(shellLink);
+        }
       }
     }
   }
@@ -118,13 +135,21 @@ function ConvertTo-ComparablePath {
   }
 }
 
+function Release-ComObject {
+  param([AllowNull()][object]$ComObject)
+
+  if ($null -ne $ComObject -and [System.Runtime.InteropServices.Marshal]::IsComObject($ComObject)) {
+    [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($ComObject) | Out-Null
+  }
+}
+
 function Set-EzvibesShortcutAppId {
   param(
     [Parameter(Mandatory = $true)]
     [string]$ShortcutPath
   )
 
-  [Ezvibes.ShellShortcutProperties]::SetAppUserModelId($ShortcutPath, $appUserModelId)
+  [Ezvibes.ShellLinkShortcutProperties]::SetAppUserModelId($ShortcutPath, $appUserModelId)
 }
 
 function Test-EzvibesShortcut {
@@ -137,12 +162,19 @@ function Test-EzvibesShortcut {
     return $false
   }
 
-  $shell = New-Object -ComObject WScript.Shell
-  $shortcut = $shell.CreateShortcut($ShortcutPath)
+  $shell = $null
+  $shortcut = $null
+  try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($ShortcutPath)
 
-  $targetPath = ConvertTo-ComparablePath $shortcut.TargetPath
-  $workingDirectory = ConvertTo-ComparablePath $shortcut.WorkingDirectory
-  $arguments = [string]$shortcut.Arguments
+    $targetPath = ConvertTo-ComparablePath $shortcut.TargetPath
+    $workingDirectory = ConvertTo-ComparablePath $shortcut.WorkingDirectory
+    $arguments = [string]$shortcut.Arguments
+  } finally {
+    Release-ComObject $shortcut
+    Release-ComObject $shell
+  }
 
   $repoPath = ConvertTo-ComparablePath $repoRoot
   $expectedWscript = ConvertTo-ComparablePath (Join-Path $env:WINDIR 'System32\wscript.exe')
@@ -168,15 +200,27 @@ function New-EzvibesShortcut {
   $shortcutDir = Split-Path -Parent $ShortcutPath
   New-Item -ItemType Directory -Force -Path $shortcutDir | Out-Null
 
-  $shell = New-Object -ComObject WScript.Shell
-  $shortcut = $shell.CreateShortcut($ShortcutPath)
-  $shortcut.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
-  $shortcut.Arguments = '"' + $launcherPath + '"'
-  $shortcut.WorkingDirectory = [string]$repoRoot
-  $shortcut.IconLocation = $iconPath + ',0'
-  $shortcut.Description = 'Launch ezvibes'
-  $shortcut.Save()
+  $shell = $null
+  $shortcut = $null
+  try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut($ShortcutPath)
+    $shortcut.TargetPath = Join-Path $env:WINDIR 'System32\wscript.exe'
+    $shortcut.Arguments = '"' + $launcherPath + '"'
+    $shortcut.WorkingDirectory = [string]$repoRoot
+    $shortcut.IconLocation = $iconPath + ',0'
+    $shortcut.Description = 'Launch ezvibes'
+    $shortcut.Save()
+  } finally {
+    Release-ComObject $shortcut
+    Release-ComObject $shell
+  }
+
   Set-EzvibesShortcutAppId -ShortcutPath $ShortcutPath
+
+  if (-not (Test-EzvibesShortcut -ShortcutPath $ShortcutPath)) {
+    throw "Shortcut was not valid after writing AppUserModelID: $ShortcutPath"
+  }
 }
 
 # Start Menu shortcut (this is what Windows Search indexes)
