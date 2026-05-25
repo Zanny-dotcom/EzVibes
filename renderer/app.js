@@ -936,6 +936,7 @@
     windowEl.innerHTML = `
       <div class="folder-terminal-tab-strip" role="tablist" aria-label="Agent sessions"></div>
       <div class="folder-terminal-tab">
+        <span class="folder-name-label"></span>
         <div class="session-controls">
           <button class="session-control minimize" title="Minimize">_</button>
           <button class="session-control close" title="Close">×</button>
@@ -945,6 +946,10 @@
         <div class="terminal-host is-active"></div>
       </div>
     `;
+
+    const folderNameLabel = windowEl.querySelector('.folder-name-label');
+    folderNameLabel.textContent = name;
+    folderNameLabel.title = folderPath;
 
     const tabStripEl = windowEl.querySelector('.folder-terminal-tab-strip');
     const addTabBtnEl = document.createElement('button');

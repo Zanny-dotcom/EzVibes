@@ -154,6 +154,7 @@ This avoids clipping the right edge of terminal content.
 - Right-clicking a file has no real actions yet.
 - `Launch Claude Here` launches a Claude session window for the current directory.
 - Session windows show a Chrome-style tab strip at the top. Each tab is an independent PTY running in the window's folder; today the agent is either `claude --dangerously-skip-permissions` or `codex --yolo`.
+- Each session window also shows a small `.folder-name-label` chip on the yellow top strip, just left of the minimize/close buttons. It displays the folder basename (e.g., `CP`) so the user can tell which folder the window is rooted in; hovering shows the full path via the `title` attribute. The value is captured once at window creation.
 - Tabs are labelled by their agent. Default labels are `CLAUDE` / `CODEX`; the second-and-later tabs in a window also carry the per-window monotonic counter as a suffix (`CLAUDE 2`, `CODEX 3`). The counter is never reused after a tab closes.
 - Right-click a tab chip → Rename to override the default label with a custom name. Typing the literal default back in clears the custom name.
 - Codex chips are tinted teal so they read as distinct from the amber Claude chips. Active / hover / exited modifiers mirror across both palettes.
