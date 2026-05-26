@@ -8,6 +8,7 @@ $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).ProviderP
 $appUserModelId = 'com.ezvibes.app'
 $launcherPath = Join-Path $repoRoot 'ezvibes.vbs'
 $iconPath = Join-Path $repoRoot 'renderer\ezvibes.ico'
+$electronExePath = Join-Path $repoRoot 'node_modules\electron\dist\electron.exe'
 
 if (-not (Test-Path -LiteralPath $launcherPath)) {
   throw "Launcher not found: $launcherPath. Make sure ezvibes.vbs exists at the repo root."
@@ -15,6 +16,17 @@ if (-not (Test-Path -LiteralPath $launcherPath)) {
 
 if (-not (Test-Path -LiteralPath $iconPath)) {
   throw "Icon not found: $iconPath. Run scripts/build-ezvibes-icon.ps1 first."
+}
+
+if (-not (Test-Path -LiteralPath $electronExePath)) {
+  throw @"
+Electron runtime not found: $electronExePath
+
+Run these from the repo root before installing shortcuts:
+  npm install
+  npm run electron:install
+  npm run rebuild:native
+"@
 }
 
 if (-not ([System.Management.Automation.PSTypeName]'Ezvibes.ShellLinkShortcutProperties').Type) {
@@ -178,7 +190,7 @@ function Test-EzvibesShortcut {
 
   $repoPath = ConvertTo-ComparablePath $repoRoot
   $expectedWscript = ConvertTo-ComparablePath (Join-Path $env:WINDIR 'System32\wscript.exe')
-  $expectedElectron = ConvertTo-ComparablePath (Join-Path $repoRoot 'node_modules\electron\dist\electron.exe')
+  $expectedElectron = ConvertTo-ComparablePath $electronExePath
 
   if ($targetPath -eq $expectedWscript -and $arguments.IndexOf($launcherPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
     return $true

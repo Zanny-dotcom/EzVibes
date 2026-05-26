@@ -24,7 +24,7 @@ Core interaction:
 
 ## Stack
 
-- Electron 33
+- Electron 42
 - Vanilla JavaScript, HTML, CSS (no React, TypeScript, bundler, or tests)
 - `node-pty@1.1.0` for real interactive terminal sessions
 - `@xterm/xterm@5.5.0` for terminal rendering
@@ -58,9 +58,11 @@ Install/rebuild:
 
 ```powershell
 npm install
+npm run electron:install
+npm run rebuild:native
 ```
 
-`npm install` runs `scripts/postinstall.js`, which patches `node-pty` build files and runs `@electron/rebuild`.
+`npm install` runs `scripts/postinstall.js`, which patches `node-pty` build files and runs the local `electron-rebuild` binary. `npm run electron:install` prewarms Electron's runtime binary for repo-launched shortcuts, and `npm run rebuild:native` force-rebuilds `node-pty` against the installed Electron version.
 
 ## ezvibes Launcher
 
@@ -70,6 +72,8 @@ One-time setup:
 
 ```powershell
 ./scripts/build-ezvibes-icon.ps1   # only if renderer/ezvibes.ico is missing or you tweaked the design
+npm run electron:install
+npm run rebuild:native
 ./startup/Install-EzvibesShortcuts.ps1
 ```
 
@@ -99,7 +103,7 @@ Main IPC channels:
 
 Preload API on `window.ezvibes`: `getInitialPath`, `getQuickPaths`, `listDirectory`, `createTerminal`, `writeTerminal`, `resizeTerminal`, `closeTerminal`, `onTerminalData`, `onTerminalExit`, `readClipboard`, `writeClipboard`, `getPathForFile`.
 
-Terminal sessions are stored in `main.js` in a `Map` keyed by renderer-created `sessionId`. The renderer groups PTYs into session windows (one per folder), each holding one or more tabs. State lives in:
+Terminal sessions are stored in `main.js` in a `Map` keyed by renderer-created `sessionId`; each record also stores the owning `webContents` id so other renderers cannot write to or close it. The renderer groups PTYs into session windows (one per folder), each holding one or more tabs. State lives in:
 
 - `state.windowsByPath` — `Map<folderPath, SessionWindow>`. One session window per folder.
 - `state.tabsById` — `Map<tabId, Tab>`. The tab id doubles as the IPC `sessionId` passed to main.
@@ -110,17 +114,14 @@ Minimized session windows keep all their tab PTYs running. Closing a tab kills t
 
 The default Electron application menu is suppressed (`Menu.setApplicationMenu(null)`).
 
-## Claude Launch Details
+## Agent Launch Details
 
-`main.js` detects `pwsh` first, then falls back to `powershell.exe`.
+`main.js` resolves agent executables before creating a PTY. The preferred launch path is direct:
 
-For PowerShell shells, it uses `-NoExit -EncodedCommand` with a UTF-16LE base64-encoded script that:
+- Claude: `claude.exe --dangerously-skip-permissions`
+- Codex: native `codex.exe --yolo` from the installed `@openai/codex` package
 
-- installs a prompt wrapper that emits OSC cwd updates,
-- `Set-Location -LiteralPath`s to the selected folder,
-- runs `claude --dangerously-skip-permissions`.
-
-For non-PowerShell shells, it falls back to spawning the shell in the selected folder and writing the Claude command after a short delay.
+The PTY environment is intentionally small, but keeps Windows command-resolution basics such as `PATH`, `PATHEXT`, `SystemRoot`, `SystemDrive`, user profile paths, temp paths, and npm / `.local\bin` command folders. Secrets such as `*KEY*`, `*TOKEN*`, `*SECRET*`, `AWS_*`, `AZURE_*`, `OPENAI_*`, and `ANTHROPIC_*` are stripped. PowerShell/CMD wrappers are used only as fallbacks when a direct executable cannot be found.
 
 ## Terminal Fit Fix
 

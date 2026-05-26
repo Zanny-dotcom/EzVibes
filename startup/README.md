@@ -14,6 +14,16 @@ Only re-run this if you edit the generator script and want to update the icon.
 
 ## Install / refresh shortcuts
 
+Electron 42 downloads the Electron runtime on first explicit install/run, not during package postinstall. Before installing shortcuts on a fresh checkout, run:
+
+```powershell
+npm install
+npm run electron:install
+npm run rebuild:native
+```
+
+The shortcut installer checks for `node_modules\electron\dist\electron.exe` and prints these commands if the runtime is missing.
+
 ```powershell
 ./startup/Install-EzvibesShortcuts.ps1
 ```
