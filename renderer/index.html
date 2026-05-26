@@ -25,6 +25,7 @@
           <input id="search-input" type="search" placeholder="Search folders" />
         </div>
         <button id="narration-toggle" class="icon-button narration-toggle" title="What Was Made" aria-pressed="false">▤</button>
+        <button id="live-log-toggle" class="icon-button live-log-toggle" title="Live Log" aria-pressed="false">LOG</button>
       </header>
 
       <main class="shell">
@@ -53,6 +54,17 @@
             <button id="narration-close" class="icon-button" title="Close">X</button>
           </div>
           <div id="narration-body" class="narration-body"></div>
+        </aside>
+
+        <aside id="live-log-panel" class="live-log-panel" hidden>
+          <div class="live-log-header">
+            <div>
+              <div class="live-log-title">Live Log</div>
+              <div id="live-log-file" class="live-log-file"></div>
+            </div>
+            <button id="live-log-close" class="icon-button" title="Close">X</button>
+          </div>
+          <div id="live-log-body" class="live-log-body"></div>
         </aside>
       </main>
     </div>

@@ -98,10 +98,15 @@ Main IPC channels:
 - `terminal:close`
 - `terminal:data` (main → renderer)
 - `terminal:exit` (main → renderer)
+- `app:live-log`
+- `app:live-log-entry` (main → renderer)
+- `app:log`
+- `app:close-requested` (main → renderer)
+- `app:confirm-close`
 - `clipboard:read`
 - `clipboard:write`
 
-Preload API on `window.ezvibes`: `getInitialPath`, `getQuickPaths`, `listDirectory`, `createTerminal`, `writeTerminal`, `resizeTerminal`, `closeTerminal`, `onTerminalData`, `onTerminalExit`, `readClipboard`, `writeClipboard`, `getPathForFile`.
+Preload API on `window.ezvibes`: `getInitialPath`, `getQuickPaths`, `listDirectory`, `createTerminal`, `writeTerminal`, `resizeTerminal`, `closeTerminal`, `onTerminalData`, `onTerminalExit`, `getLiveLog`, `onLiveLogEntry`, `logEvent`, `onAppCloseRequested`, `confirmAppClose`, `readClipboard`, `writeClipboard`, `getPathForFile`.
 
 Terminal sessions are stored in `main.js` in a `Map` keyed by renderer-created `sessionId`; each record also stores the owning `webContents` id so other renderers cannot write to or close it. The renderer groups PTYs into session windows (one per folder), each holding one or more tabs. State lives in:
 
@@ -113,6 +118,22 @@ Each `SessionWindow` carries `tabs: Tab[]`, an `activeTabId`, and a monotonic `n
 Minimized session windows keep all their tab PTYs running. Closing a tab kills that tab's PTY; closing the last tab closes the whole window.
 
 The default Electron application menu is suppressed (`Menu.setApplicationMenu(null)`).
+
+## Operational Diagnostics
+
+EZvibes has a live diagnostics log for app lifecycle and terminal session events. The top bar `LOG` button opens an in-app Live Log drawer. The drawer shows the most recent in-memory events and the current disk log path.
+
+Durable logs are written as JSONL files under:
+
+```powershell
+$env:APPDATA\EZvibes\logs\ezvibes-YYYY-MM-DD.jsonl
+```
+
+The log records app/window lifecycle, close attempts, renderer failures, PTY creation/exits/kills, and renderer diagnostic events. It intentionally does not record terminal input/output text, prompts, model responses, or shell scrollback.
+
+If a top-level app close is requested while live PTY sessions exist, `main.js` prevents the close and asks the renderer to show an `Exit EZvibes?` confirmation. The safe default is to stay in the app. Confirming the dialog allows the close and kills all live sessions; cancelling leaves the app and sessions running.
+
+The safety/diagnostics plan lives at `docs/superpowers/plans/2026-05-26-ezvibes-safety-logging.md`.
 
 ## Agent Launch Details
 
@@ -139,11 +160,11 @@ Important sizing behavior in `renderer/app.js`:
 
 - Waits for the Genie opening animation to finish.
 - Waits for `document.fonts.ready`.
-- Waits two `requestAnimationFrame` ticks.
-- Then calls `fitAddon.fit()` and sends the PTY resize.
-- Uses a per-session `ResizeObserver` on `.terminal-host`.
+- Waits until the active `.terminal-host` has a usable non-zero layout box and `fitAddon.proposeDimensions()` returns finite rows/cols.
+- Then calls `fitAddon.fit()`, sends a PTY resize only when the terminal dimensions changed, refreshes the viewport, and scrolls to bottom when the tab was previously at bottom or was revealed after hidden output.
+- Uses a per-session `ResizeObserver` on `.terminal-pocket` to schedule the active tab's visible-terminal reconcile path.
 
-This avoids clipping the right edge of terminal content.
+This avoids fitting against 0x0/stale hidden hosts and prevents terminal edge or bottom clipping.
 
 ## Current UX
 

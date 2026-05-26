@@ -1,0 +1,225 @@
+{
+  "main": {
+    "id": "e436faf6a9eeb5dc",
+    "type": "split",
+    "children": [
+      {
+        "id": "b76ed8ab57ad81f9",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "cb4b5ea5aaa9a056",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "CLAUDE.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "CLAUDE"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "0de68058baf95257",
+    "type": "split",
+    "children": [
+      {
+        "id": "5ae198ff14a5c2f6",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "d9a5a35e07384b6d",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "b969b1ae6b927aad",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "c1d7ff7a2c750a74",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "e299d8a6d8ad6260",
+    "type": "split",
+    "children": [
+      {
+        "id": "4014b563d6dc7557",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "70b36cacdf9034f2",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "CLAUDE.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for CLAUDE"
+            }
+          },
+          {
+            "id": "73a2108ca14eff8a",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "CLAUDE.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from CLAUDE"
+            }
+          },
+          {
+            "id": "42ce05f8a8608559",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "f9acc30417782083",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "5eb882123f5e8cc9",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "CLAUDE.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of CLAUDE"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "cb4b5ea5aaa9a056",
+  "lastOpenFiles": [
+    "summary.md.tmp.4452.ad9ec9d277d7",
+    "startup/README.md.tmp.4452.df750ef2b5db",
+    "CLAUDE.md.tmp.4452.c73cf4f065e4",
+    "renderer/app.js.tmp.4452.d996683dc85a",
+    "startup/Install-EzvibesShortcuts.ps1.tmp.4452.c36f46935885",
+    "renderer/index.html.tmp.4452.ded39147cfe3",
+    "renderer/index.html.tmp.4452.63d5159a67c6",
+    "preload.js.tmp.4452.8bc528ef4336",
+    "package-lock.json.tmp.4452.d39998168e6e",
+    "package.json.tmp.4452.bf2fcfe3f4a5",
+    "main.js.tmp.4452.ffa5732e8b21",
+    "browser-plan.md",
+    "CLAUDE.md",
+    "research/summary.md",
+    "research/description22.md",
+    "research/description30.md",
+    "research/description29.md",
+    "research/description23.md",
+    "research/description28.md",
+    "research/description27.md",
+    "research/description25.md",
+    "research/description24.md",
+    "research/description26.md",
+    "research/description21.md",
+    "research/description17.md",
+    "research/description19.md",
+    "research/description16.md",
+    "research/description20.md",
+    "research/description18.md",
+    "summary.md",
+    "research/description3.md",
+    "research/description4.md",
+    "research/description10.md",
+    "research/description14.md",
+    "research/description12.md",
+    "research/description13.md"
+  ]
+}

@@ -10,6 +10,9 @@
     tabsById: new Map(),
     narrationByPath: new Map(),
     narrationOpen: false,
+    liveLogOpen: false,
+    liveLogEntries: [],
+    liveLogFile: '',
     previewPath: '',
     viewMode: 'all',
     windowRenderable: true,
@@ -36,9 +39,15 @@
     els.narrationClose = document.getElementById('narration-close');
     els.narrationFolder = document.getElementById('narration-folder');
     els.narrationBody = document.getElementById('narration-body');
+    els.liveLogToggle = document.getElementById('live-log-toggle');
+    els.liveLogPanel = document.getElementById('live-log-panel');
+    els.liveLogClose = document.getElementById('live-log-close');
+    els.liveLogFile = document.getElementById('live-log-file');
+    els.liveLogBody = document.getElementById('live-log-body');
 
     bindEvents();
     bindTerminalEvents();
+    bindAppDiagnostics();
 
     Promise.all([api.getInitialPath(), api.getQuickPaths()])
       .then(([initialPath, quickPaths]) => {
@@ -80,6 +89,8 @@
       els.narrationToggle.setAttribute('aria-pressed', 'false');
       renderNarrationSidebar();
     });
+    els.liveLogToggle.addEventListener('click', () => setLiveLogOpen(!state.liveLogOpen));
+    els.liveLogClose.addEventListener('click', () => setLiveLogOpen(false));
     els.grid.addEventListener('click', (event) => {
       if (event.target !== els.grid) return;
       if (!state.previewPath) return;
@@ -208,43 +219,235 @@
       }
     }, true);
 
-    window.addEventListener('dragover', (event) => {
-      event.preventDefault();
-      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
-    });
+    window.addEventListener('dragenter', handleWindowDragEnter);
+    window.addEventListener('dragover', handleWindowDragOver);
+    window.addEventListener('dragleave', handleWindowDragLeave);
+    window.addEventListener('dragend', clearTerminalDropTarget);
+    window.addEventListener('drop', handleWindowDrop);
+  }
 
-    window.addEventListener('drop', async (event) => {
-      event.preventDefault();
-      if (!event.dataTransfer || !event.dataTransfer.files) return;
-      const paths = [];
-      for (let i = 0; i < event.dataTransfer.files.length; i++) {
-        const file = event.dataTransfer.files[i];
-        if (!file) continue;
-        let filePath = '';
-        try { filePath = api.getPathForFile(file); } catch {}
-        if (filePath) paths.push(filePath);
+  function isFileDragEvent(event) {
+    const dataTransfer = event && event.dataTransfer;
+    if (!dataTransfer) return false;
+    const types = Array.from(dataTransfer.types || []);
+    return types.includes('Files') || !!(dataTransfer.files && dataTransfer.files.length > 0);
+  }
+
+  function setDropEffect(event) {
+    try {
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    } catch {}
+  }
+
+  function handleWindowDragEnter(event) {
+    if (!isFileDragEvent(event)) return;
+    event.preventDefault();
+    setDropEffect(event);
+    updateTerminalDropTarget(findDropTargetTab(event.target));
+  }
+
+  function handleWindowDragOver(event) {
+    if (!isFileDragEvent(event)) return;
+    event.preventDefault();
+    setDropEffect(event);
+    updateTerminalDropTarget(findDropTargetTab(event.target));
+  }
+
+  function handleWindowDragLeave(event) {
+    if (!isFileDragEvent(event)) return;
+    if (event.clientX <= 0 || event.clientY <= 0 || event.clientX >= window.innerWidth || event.clientY >= window.innerHeight) {
+      clearTerminalDropTarget();
+    }
+  }
+
+  async function handleWindowDrop(event) {
+    if (!isFileDragEvent(event)) return;
+    event.preventDefault();
+    clearTerminalDropTarget();
+
+    const files = collectDroppedFiles(event.dataTransfer);
+    if (files.length === 0) {
+      logRendererEvent('renderer.drop.empty', { target: describeDropTarget(event.target) }, 'warn');
+      return;
+    }
+
+    const target = event.target;
+    const tab = findDropTargetTab(target);
+    if (tab) {
+      await dropFilesIntoTerminal(tab, files, target);
+      return;
+    }
+
+    const paths = getDiskBackedDropPaths(files);
+    if (paths.length === 0) {
+      logRendererEvent('renderer.drop.no_paths', {
+        fileCount: files.length,
+        target: describeDropTarget(target),
+        files: summarizeDroppedFiles(files),
+      }, 'warn');
+      return;
+    }
+
+    if (target && target.closest) {
+      const input = target.closest('input:not([readonly]), textarea:not([readonly])');
+      if (input) {
+        insertTextIntoInput(input, paths.join(' '));
+        return;
       }
-      if (paths.length === 0) return;
-      const target = event.target;
-      if (target && target.closest) {
-        if (target.closest('.terminal-host')) {
-          const tab = findTabForElement(target);
-          if (tab) {
-            const text = paths.map(quotePath).join(' ') + ' ';
-            api.writeTerminal(tab.id, text);
-            return;
-          }
-        }
-        const input = target.closest('input:not([readonly]), textarea:not([readonly])');
-        if (input) {
-          insertTextIntoInput(input, paths.join(' '));
-          return;
-        }
-      }
+    }
+
+    try {
+      await navigateTo(paths[0]);
+    } catch {}
+  }
+
+  function collectDroppedFiles(dataTransfer) {
+    if (!dataTransfer) return [];
+    const files = [];
+    const seen = new Set();
+    const addFile = (file) => {
+      if (!file) return;
+      const key = `${file.name || ''}|${file.size || 0}|${file.type || ''}|${file.lastModified || 0}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      files.push(file);
+    };
+
+    for (const item of Array.from(dataTransfer.items || [])) {
       try {
-        await navigateTo(paths[0]);
+        if (item && item.kind === 'file' && typeof item.getAsFile === 'function') {
+          addFile(item.getAsFile());
+        }
       } catch {}
+    }
+
+    for (const file of Array.from(dataTransfer.files || [])) {
+      addFile(file);
+    }
+
+    return files;
+  }
+
+  function getDiskBackedDropPaths(files) {
+    const paths = [];
+    for (const file of files || []) {
+      let filePath = '';
+      try { filePath = api.getPathForFile(file); } catch {}
+      if (filePath) paths.push(filePath);
+    }
+    return paths;
+  }
+
+  async function dropFilesIntoTerminal(tab, files, target) {
+    if (!isTabLive(tab)) {
+      logRendererEvent('renderer.terminal_drop.rejected', {
+        reason: 'tab-not-live',
+        sessionId: tab && tab.id,
+        fileCount: files.length,
+      }, 'warn');
+      return;
+    }
+
+    let result;
+    try {
+      if (api.resolveTerminalDroppedFiles) {
+        result = await api.resolveTerminalDroppedFiles(tab.id, files);
+      } else {
+        const paths = getDiskBackedDropPaths(files);
+        result = { paths, diskPathCount: paths.length, savedImageCount: 0, rejected: [] };
+      }
+    } catch (error) {
+      logRendererEvent('renderer.terminal_drop.resolve_failed', {
+        sessionId: tab.id,
+        fileCount: files.length,
+        message: (error && error.message) || String(error),
+      }, 'error');
+      return;
+    }
+
+    const paths = Array.isArray(result && result.paths)
+      ? result.paths.filter((value) => typeof value === 'string' && value)
+      : [];
+    const rejected = Array.isArray(result && result.rejected) ? result.rejected : [];
+    logRendererEvent(paths.length > 0 ? 'renderer.terminal_drop.resolved' : 'renderer.terminal_drop.no_paths', {
+      sessionId: tab.id,
+      fileCount: files.length,
+      pathCount: paths.length,
+      diskPathCount: Number(result && result.diskPathCount) || 0,
+      savedImageCount: Number(result && result.savedImageCount) || 0,
+      rejectedCount: rejected.length,
+      target: describeDropTarget(target),
+      files: summarizeDroppedFiles(files),
+    }, paths.length > 0 ? 'info' : 'warn');
+
+    if (paths.length === 0) return;
+
+    api.writeTerminal(tab.id, `${paths.map(quotePath).join(' ')} `);
+    try { tab.term.focus(); } catch {}
+  }
+
+  function findDropTargetTab(target) {
+    if (!target || !target.closest) return null;
+
+    const host = target.closest('.terminal-host');
+    if (host) return findTabForElement(host);
+
+    const chip = target.closest('.folder-terminal-tab-chip');
+    if (chip && chip.dataset && chip.dataset.tabId) {
+      return state.tabsById.get(chip.dataset.tabId) || null;
+    }
+
+    const sessionWindow = findSessionWindowForElement(target);
+    if (!sessionWindow || sessionWindow.minimized || sessionWindow.windowEl.hidden) return null;
+    if (target.closest('.terminal-pocket') || target.closest('.folder-terminal')) {
+      return getActiveTab(sessionWindow);
+    }
+
+    return null;
+  }
+
+  function findSessionWindowForElement(element) {
+    if (!element || !element.closest) return null;
+    const windowEl = element.closest('.folder-terminal');
+    if (!windowEl) return null;
+    const windowId = windowEl.dataset && windowEl.dataset.windowId;
+    if (!windowId) return null;
+    for (const sessionWindow of state.windowsByPath.values()) {
+      if (sessionWindow.id === windowId) return sessionWindow;
+    }
+    return null;
+  }
+
+  function updateTerminalDropTarget(tab) {
+    clearTerminalDropTarget();
+    if (!tab || !tab.sessionWindow) return;
+    if (tab.sessionWindow.terminalPocketEl) tab.sessionWindow.terminalPocketEl.classList.add('is-file-drag-over');
+    if (tab.terminalEl) tab.terminalEl.classList.add('is-file-drag-over');
+  }
+
+  function clearTerminalDropTarget() {
+    document.querySelectorAll('.terminal-pocket.is-file-drag-over, .terminal-host.is-file-drag-over').forEach((el) => {
+      el.classList.remove('is-file-drag-over');
     });
+  }
+
+  function describeDropTarget(target) {
+    if (!target || !target.closest) return { tag: '' };
+    return {
+      tag: String(target.tagName || '').toLowerCase(),
+      terminal: !!target.closest('.terminal-host'),
+      terminalPocket: !!target.closest('.terminal-pocket'),
+      tabChip: !!target.closest('.folder-terminal-tab-chip'),
+      input: !!target.closest('input:not([readonly]), textarea:not([readonly])'),
+    };
+  }
+
+  function summarizeDroppedFiles(files) {
+    return Array.from(files || []).slice(0, 10).map((file) => ({
+      name: String((file && file.name) || '').slice(0, 120),
+      type: String((file && file.type) || '').slice(0, 80),
+      size: Number(file && file.size) || 0,
+    }));
   }
 
   function bindTerminalEvents() {
@@ -280,6 +483,18 @@
         summary: isError ? `Exited with error code ${exitCode}.` : 'Session completed.',
       });
     });
+  }
+
+  function bindAppDiagnostics() {
+    if (api.onLiveLogEntry) {
+      api.onLiveLogEntry((entry) => {
+        ingestLiveLogEntry(entry);
+      });
+    }
+    if (api.onAppCloseRequested) {
+      api.onAppCloseRequested(handleAppCloseRequested);
+    }
+    loadLiveLog();
   }
 
   async function navigateTo(folderPath, options) {
@@ -484,7 +699,7 @@
     animateOpen(sessionWindow, sourceCard || findCard(folderPath));
     tab.term.open(tab.terminalEl);
     tab.term.onData((data) => handleTerminalInput(tab, data));
-    await fitAfterStableLayout(tab, { focus: true, waitForAnimation: true });
+    await terminalBecameVisible(tab, { focus: true, waitForAnimation: true, reason: 'launch' });
     observeSessionSize(sessionWindow);
 
     let result;
@@ -513,6 +728,7 @@
         summary: message,
       });
     } else {
+      markPtyCreated(tab);
       setNarrationSummary(folderPath, 'active', 'Claude session started.');
       addNarrationEvent(folderPath, 'tab-started', `Started Claude tab ${getTabLabel(tab)} in ${basename(folderPath)}.`);
     }
@@ -540,6 +756,11 @@
     brightCyan: '#9aedfe',
     brightWhite: '#ffffff',
   };
+
+  const TERMINAL_LAYOUT_DEBOUNCE_MS = 50;
+  const TERMINAL_LAYOUT_MAX_FRAMES = 18;
+  const TERMINAL_MIN_HOST_WIDTH = 20;
+  const TERMINAL_MIN_HOST_HEIGHT = 20;
 
   function makeId() {
     return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
@@ -715,6 +936,7 @@
       cancelLabel = 'Cancel',
       returnFocusTo = null,
       danger = true,
+      initialFocus = danger ? 'cancel' : 'confirm',
     } = opts || {};
 
     return new Promise((resolve) => {
@@ -771,12 +993,12 @@
           const next = document.activeElement === confirmBtn ? cancelBtn : confirmBtn;
           next.focus();
         } else if (event.key === 'Enter') {
-          if (document.activeElement === cancelBtn) {
-            event.preventDefault();
-            cleanup(false);
-          } else {
+          if (document.activeElement === confirmBtn) {
             event.preventDefault();
             cleanup(true);
+          } else {
+            event.preventDefault();
+            cleanup(false);
           }
         }
       };
@@ -788,7 +1010,10 @@
       confirmBtn.addEventListener('click', () => cleanup(true));
       window.addEventListener('keydown', onKey, true);
 
-      requestAnimationFrame(() => confirmBtn.focus());
+      requestAnimationFrame(() => {
+        const target = initialFocus === 'confirm' ? confirmBtn : cancelBtn;
+        target.focus();
+      });
     });
   }
 
@@ -996,6 +1221,8 @@
       nextTabNumber: 1,
       resizeObserver: null,
       resizeTimer: null,
+      pendingFitTab: null,
+      pendingFitOptions: null,
       newTabMenuEl: null,
       newTabMenuOpen: false,
       newTabMenuPrevFocus: null,
@@ -1160,6 +1387,10 @@
       needsViewportRefresh: false,
       scrollToBottomOnReveal: false,
       lastKnownAtBottom: true,
+      lastPtyCols: null,
+      lastPtyRows: null,
+      ptyCreated: false,
+      visibleRepairSeq: 0,
       terminalDisposables: [],
       term,
       fitAddon,
@@ -1183,8 +1414,12 @@
     const previous = getActiveTab(sessionWindow);
 
     if (sessionWindow.activeTabId === tabId) {
-      if (target.needsViewportRefresh || target.scrollToBottomOnReveal) {
-        scheduleStableFit(target, { scrollToBottom: shouldScrollToBottomOnLayout(target, opts) });
+      if (!opts.skipVisibleRepair && (target.needsViewportRefresh || target.scrollToBottomOnReveal)) {
+        scheduleTerminalBecameVisible(target, {
+          focus: opts.focus,
+          reason: 'tab-reactivate',
+          scrollToBottom: shouldScrollToBottomOnLayout(target, opts),
+        });
       }
       if (opts.focus) {
         try { target.term.focus(); } catch {}
@@ -1207,17 +1442,13 @@
       clearSessionAttention(sessionWindow);
     }
 
-    // Wait one or two animation frames so the now-visible host has a layout
-    // box, then fit and resize the PTY. Never fit hidden hosts.
-    (async () => {
-      await nextFrame();
-      await nextFrame();
-      fitTab(target);
-      repairTerminalViewport(target, { scrollToBottom: shouldScrollToBottomOnLayout(target, opts) });
-      if (opts.focus) {
-        try { target.term.focus(); } catch {}
-      }
-    })();
+    if (!opts.skipVisibleRepair) {
+      scheduleTerminalBecameVisible(target, {
+        focus: opts.focus,
+        reason: 'tab-activate',
+        scrollToBottom: shouldScrollToBottomOnLayout(target, opts),
+      });
+    }
 
     return target;
   }
@@ -1335,7 +1566,8 @@
     });
 
     // Activate it so this tab becomes visible and fits properly.
-    activateTab(sessionWindow, tab.id, { focus: true });
+    activateTab(sessionWindow, tab.id, { focus: true, skipVisibleRepair: true });
+    await terminalBecameVisible(tab, { focus: true, scrollToBottom: true, reason: 'new-tab' });
 
     addNarrationEvent(sessionWindow.folderPath, 'tab-created', `Created ${agentLabel} tab ${getTabLabel(tab)} in ${basename(sessionWindow.folderPath)}.`);
 
@@ -1365,6 +1597,7 @@
         summary: message,
       });
     } else {
+      markPtyCreated(tab);
       addNarrationEvent(sessionWindow.folderPath, 'tab-started', `Started ${agentLabel} tab ${getTabLabel(tab)} in ${basename(sessionWindow.folderPath)}.`);
     }
 
@@ -1406,8 +1639,12 @@
     const tab = getActiveTab(sessionWindow);
     if (tab) {
       const scrollToBottom = shouldScrollToBottomOnLayout(tab, { scrollToBottom: tab.scrollToBottomOnReveal });
-      repairTerminalViewportSoon(tab, { scrollToBottom });
-      fitAfterStableLayout(tab, { focus: true, waitForAnimation: true, scrollToBottom });
+      scheduleTerminalBecameVisible(tab, {
+        focus: true,
+        reason: 'session-restore',
+        scrollToBottom,
+        waitForAnimation: true,
+      });
     }
   }
 
@@ -1446,6 +1683,8 @@
       clearTimeout(sessionWindow.resizeTimer);
       sessionWindow.resizeTimer = null;
     }
+    sessionWindow.pendingFitTab = null;
+    sessionWindow.pendingFitOptions = null;
 
     // Kill or close every tab PTY and dispose every xterm.
     const tabs = sessionWindow.tabs.slice();
@@ -1545,7 +1784,8 @@
         }
         continue;
       }
-      scheduleStableFit(tab, {
+      scheduleTerminalBecameVisible(tab, {
+        reason: opts.reason || 'refresh',
         scrollToBottom: shouldScrollToBottomOnLayout(tab, opts),
       });
     }
@@ -1643,48 +1883,145 @@
     if (sessionWindow.resizeObserver || typeof ResizeObserver !== 'function') return;
     sessionWindow.resizeObserver = new ResizeObserver(() => {
       const tab = getActiveTab(sessionWindow);
-      if (tab) scheduleStableFit(tab, { scrollToBottom: shouldScrollToBottomOnLayout(tab) });
+      if (tab) {
+        scheduleTerminalBecameVisible(tab, {
+          reason: 'resize-observer',
+          scrollToBottom: shouldScrollToBottomOnLayout(tab),
+        });
+      }
     });
     sessionWindow.resizeObserver.observe(sessionWindow.terminalPocketEl);
   }
 
-  function scheduleStableFit(tab, options) {
+  function scheduleTerminalBecameVisible(tab, options) {
+    if (!tab || !tab.sessionWindow) return;
+    if (!isTabVisible(tab)) {
+      markTabForRevealRepair(tab, { scrollToBottom: options && options.scrollToBottom });
+      return;
+    }
     const sessionWindow = tab.sessionWindow;
     if (sessionWindow.resizeTimer) clearTimeout(sessionWindow.resizeTimer);
+    sessionWindow.pendingFitTab = tab;
+    sessionWindow.pendingFitOptions = mergeTerminalLayoutOptions(sessionWindow.pendingFitOptions, options);
     sessionWindow.resizeTimer = setTimeout(() => {
       sessionWindow.resizeTimer = null;
-      const opts = options || {};
-      fitAfterStableLayout(tab, {
+      const target = sessionWindow.pendingFitTab;
+      const opts = sessionWindow.pendingFitOptions || {};
+      sessionWindow.pendingFitTab = null;
+      sessionWindow.pendingFitOptions = null;
+      terminalBecameVisible(target, {
         ...opts,
         waitForAnimation: opts.waitForAnimation || sessionWindow.windowEl.classList.contains('opening'),
       });
-    }, 80);
+    }, TERMINAL_LAYOUT_DEBOUNCE_MS);
   }
 
-  async function fitAfterStableLayout(tab, options) {
+  function mergeTerminalLayoutOptions(current, next) {
+    const a = current || {};
+    const b = next || {};
+    return {
+      focus: !!(a.focus || b.focus),
+      reason: b.reason || a.reason || '',
+      scrollToBottom: !!(a.scrollToBottom || b.scrollToBottom),
+      waitForAnimation: !!(a.waitForAnimation || b.waitForAnimation),
+    };
+  }
+
+  async function terminalBecameVisible(tab, options) {
     const opts = options || {};
+    if (!tab || !tab.sessionWindow) return false;
+    const repairSeq = (tab.visibleRepairSeq || 0) + 1;
+    tab.visibleRepairSeq = repairSeq;
     if (opts.waitForAnimation) await waitForOpeningAnimation(tab.sessionWindow);
     await waitForFonts();
-    await nextFrame();
-    await nextFrame();
-    if (!isTabVisible(tab)) {
+    const hasLayout = await waitForTerminalHostLayout(tab, repairSeq);
+    if (!hasLayout) {
       markTabForRevealRepair(tab, { scrollToBottom: opts.scrollToBottom });
-      return;
+      return false;
     }
+    if (tab.visibleRepairSeq !== repairSeq || !isTabVisible(tab)) return false;
     const scrollToBottom = shouldScrollToBottomOnLayout(tab, opts);
-    fitTab(tab);
+    if (!fitTab(tab)) {
+      markTabForRevealRepair(tab, { scrollToBottom });
+      return false;
+    }
     repairTerminalViewport(tab, {
       scrollToBottom,
     });
     if (opts.focus) tab.term.focus();
+    return true;
+  }
+
+  async function waitForTerminalHostLayout(tab, repairSeq) {
+    let stableLayoutFrames = 0;
+    for (let frame = 0; frame < TERMINAL_LAYOUT_MAX_FRAMES; frame++) {
+      if (!isTabVisible(tab) || tab.visibleRepairSeq !== repairSeq) return false;
+      if (hasUsableTerminalLayout(tab) && getProposedTerminalDimensions(tab)) {
+        stableLayoutFrames += 1;
+        if (stableLayoutFrames >= 2) return true;
+      } else {
+        stableLayoutFrames = 0;
+      }
+      await nextFrame();
+    }
+    return false;
+  }
+
+  function hasUsableTerminalLayout(tab) {
+    if (!tab || !tab.terminalEl) return false;
+    try {
+      const style = window.getComputedStyle(tab.terminalEl);
+      if (style.display === 'none' || style.visibility === 'hidden') return false;
+      const rect = tab.terminalEl.getBoundingClientRect();
+      return rect.width >= TERMINAL_MIN_HOST_WIDTH && rect.height >= TERMINAL_MIN_HOST_HEIGHT;
+    } catch {}
+    return false;
+  }
+
+  function getProposedTerminalDimensions(tab) {
+    if (!tab || !tab.fitAddon || typeof tab.fitAddon.proposeDimensions !== 'function') return null;
+    try {
+      const dims = tab.fitAddon.proposeDimensions();
+      if (!dims) return null;
+      const cols = Number(dims.cols);
+      const rows = Number(dims.rows);
+      if (!Number.isFinite(cols) || !Number.isFinite(rows)) return null;
+      if (cols < 2 || rows < 1) return null;
+      return { cols, rows };
+    } catch {}
+    return null;
   }
 
   function fitTab(tab) {
-    if (!isTabVisible(tab)) return;
+    if (!isTabVisible(tab)) return false;
+    if (!getProposedTerminalDimensions(tab)) return false;
+    const beforeCols = tab.term.cols;
+    const beforeRows = tab.term.rows;
     try {
       tab.fitAddon.fit();
-      api.resizeTerminal(tab.id, tab.term.cols, tab.term.rows);
-    } catch {}
+    } catch {
+      return false;
+    }
+    const changed = beforeCols !== tab.term.cols || beforeRows !== tab.term.rows;
+    if (changed) syncPtySize(tab);
+    return true;
+  }
+
+  function markPtyCreated(tab) {
+    if (!tab || !tab.term) return;
+    tab.ptyCreated = true;
+    tab.lastPtyCols = tab.term.cols;
+    tab.lastPtyRows = tab.term.rows;
+  }
+
+  function syncPtySize(tab) {
+    if (!tab || !tab.ptyCreated || !tab.term) return;
+    const cols = tab.term.cols;
+    const rows = tab.term.rows;
+    if (tab.lastPtyCols === cols && tab.lastPtyRows === rows) return;
+    tab.lastPtyCols = cols;
+    tab.lastPtyRows = rows;
+    api.resizeTerminal(tab.id, cols, rows);
   }
 
   function isTabVisible(tab) {
@@ -1820,7 +2157,7 @@
 
   function quotePath(p) {
     if (!p) return '';
-    return `"${p}"`;
+    return `"${String(p).replace(/"/g, '\\"')}"`;
   }
 
   function showTabContextMenu(tab, x, y) {
@@ -1922,6 +2259,122 @@
     const top = Math.min(y, window.innerHeight - rect.height - 12);
     els.contextMenu.style.left = `${Math.max(12, left)}px`;
     els.contextMenu.style.top = `${Math.max(12, top)}px`;
+  }
+
+  function setLiveLogOpen(open) {
+    state.liveLogOpen = !!open;
+    if (els.liveLogToggle) els.liveLogToggle.setAttribute('aria-pressed', state.liveLogOpen ? 'true' : 'false');
+    renderLiveLog();
+    if (state.liveLogOpen) loadLiveLog();
+    logRendererEvent(state.liveLogOpen ? 'renderer.live_log.opened' : 'renderer.live_log.closed');
+  }
+
+  async function loadLiveLog() {
+    if (!api.getLiveLog) return;
+    try {
+      const result = await api.getLiveLog();
+      state.liveLogEntries = Array.isArray(result && result.entries) ? result.entries : [];
+      state.liveLogFile = (result && result.logFile) || '';
+      renderLiveLog();
+    } catch (error) {
+      ingestLiveLogEntry({
+        time: new Date().toISOString(),
+        level: 'error',
+        event: 'renderer.live_log_load_failed',
+        details: { message: (error && error.message) || String(error) },
+      });
+    }
+  }
+
+  function ingestLiveLogEntry(entry) {
+    if (!entry || typeof entry !== 'object') return;
+    state.liveLogEntries.push(entry);
+    if (state.liveLogEntries.length > 500) {
+      state.liveLogEntries.splice(0, state.liveLogEntries.length - 500);
+    }
+    if (state.liveLogOpen) renderLiveLog();
+  }
+
+  function renderLiveLog() {
+    if (!els.liveLogPanel || !els.liveLogBody) return;
+    els.liveLogPanel.hidden = !state.liveLogOpen;
+    if (!state.liveLogOpen) return;
+
+    els.liveLogFile.textContent = state.liveLogFile || '';
+    els.liveLogBody.innerHTML = '';
+
+    if (state.liveLogEntries.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'live-log-empty';
+      empty.textContent = 'No diagnostic events yet.';
+      els.liveLogBody.appendChild(empty);
+      return;
+    }
+
+    for (const entry of state.liveLogEntries.slice(-300)) {
+      const row = document.createElement('div');
+      const level = String(entry.level || 'info').toLowerCase();
+      row.className = `live-log-row live-log-${level}`;
+
+      const meta = document.createElement('div');
+      meta.className = 'live-log-meta';
+      const time = entry.time ? new Date(entry.time).toLocaleTimeString() : '';
+      meta.textContent = `${time} ${level.toUpperCase()} ${entry.event || 'event'}`;
+
+      const detail = document.createElement('pre');
+      detail.className = 'live-log-detail';
+      detail.textContent = formatLogDetails(entry.details);
+
+      row.append(meta, detail);
+      els.liveLogBody.appendChild(row);
+    }
+
+    requestAnimationFrame(() => {
+      els.liveLogBody.scrollTop = els.liveLogBody.scrollHeight;
+    });
+  }
+
+  function formatLogDetails(details) {
+    if (!details || (typeof details === 'object' && Object.keys(details).length === 0)) return '';
+    try {
+      return JSON.stringify(details, null, 2);
+    } catch {
+      return String(details);
+    }
+  }
+
+  async function handleAppCloseRequested(payload) {
+    const requestId = payload && payload.requestId;
+    const liveSessionCount = Number(payload && payload.liveSessionCount) || 0;
+    const noun = liveSessionCount === 1 ? 'live terminal' : 'live terminals';
+    logRendererEvent('renderer.close_prompt_shown', { requestId, liveSessionCount });
+    const ok = await confirmDestructiveClose({
+      title: 'Exit EZvibes?',
+      body: `EZvibes still has ${liveSessionCount} ${noun} running. Exiting will end every Claude/Codex session and lose terminal scrollback.`,
+      confirmLabel: 'Exit EZvibes',
+      cancelLabel: 'Stay',
+      danger: true,
+      initialFocus: 'cancel',
+    });
+    logRendererEvent(ok ? 'renderer.close_prompt_confirmed' : 'renderer.close_prompt_cancelled', {
+      requestId,
+      liveSessionCount,
+    });
+    try {
+      await api.confirmAppClose(requestId, ok);
+    } catch (error) {
+      logRendererEvent('renderer.close_prompt_response_failed', {
+        requestId,
+        message: (error && error.message) || String(error),
+      }, 'error');
+    }
+  }
+
+  function logRendererEvent(event, details, level) {
+    if (!api.logEvent) return;
+    try {
+      api.logEvent(event, details || {}, level || 'info');
+    } catch {}
   }
 
   function getNarration(folderPath) {
