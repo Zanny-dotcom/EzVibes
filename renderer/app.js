@@ -12,6 +12,7 @@
     narrationOpen: false,
     previewPath: '',
     viewMode: 'all',
+    windowRenderable: true,
   };
 
   const els = {};
@@ -104,12 +105,28 @@
       event.stopPropagation();
       focusTabButton(tab);
     }, true);
-    window.addEventListener('resize', () => {
-      for (const sessionWindow of state.windowsByPath.values()) {
-        const tab = getActiveTab(sessionWindow);
-        if (tab) scheduleStableFit(tab);
+    window.addEventListener('resize', () => refreshVisibleTerminalViewports({ reason: 'resize' }));
+    window.addEventListener('focus', () => {
+      state.windowRenderable = true;
+      refreshVisibleTerminalViewports({ reason: 'focus' });
+    });
+    window.addEventListener('pageshow', () => {
+      state.windowRenderable = true;
+      refreshVisibleTerminalViewports({ reason: 'pageshow' });
+    });
+    window.addEventListener('blur', () => markVisibleTerminalViewportsForReveal());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        state.windowRenderable = false;
+        markVisibleTerminalViewportsForReveal();
+      } else {
+        state.windowRenderable = true;
+        refreshVisibleTerminalViewports({ reason: 'visibility' });
       }
     });
+    if (api.onWindowLifecycle) {
+      api.onWindowLifecycle(handleWindowLifecycle);
+    }
 
     window.addEventListener('keydown', async (event) => {
       if (!event.ctrlKey || event.altKey || event.metaKey) return;
@@ -236,8 +253,7 @@
       if (!tab) return;
       tab.term.write(data);
       if (!isTabVisible(tab)) {
-        tab.needsViewportRefresh = true;
-        tab.scrollToBottomOnReveal = true;
+        markTabForRevealRepair(tab, { scrollToBottom: true });
       }
       handleTerminalOutput(tab, data);
     });
@@ -984,6 +1000,7 @@
       newTabMenuOpen: false,
       newTabMenuPrevFocus: null,
       attentionState: false,
+      _minimizing: false,
     };
 
     // Build the first tab and attach its chip.
@@ -1142,6 +1159,8 @@
       attentionState: false,
       needsViewportRefresh: false,
       scrollToBottomOnReveal: false,
+      lastKnownAtBottom: true,
+      terminalDisposables: [],
       term,
       fitAddon,
       terminalEl,
@@ -1151,6 +1170,8 @@
       closeBtnEl: null,
     };
 
+    attachTerminalViewportTracking(tab);
+
     return tab;
   }
 
@@ -1159,15 +1180,20 @@
     const target = sessionWindow.tabs.find((t) => t.id === tabId);
     if (!target) return null;
     const opts = options || {};
+    const previous = getActiveTab(sessionWindow);
 
     if (sessionWindow.activeTabId === tabId) {
       if (target.needsViewportRefresh || target.scrollToBottomOnReveal) {
-        scheduleStableFit(target, { scrollToBottom: target.scrollToBottomOnReveal });
+        scheduleStableFit(target, { scrollToBottom: shouldScrollToBottomOnLayout(target, opts) });
       }
       if (opts.focus) {
         try { target.term.focus(); } catch {}
       }
       return target;
+    }
+
+    if (previous && previous.id !== target.id) {
+      snapshotTabBeforeHide(previous);
     }
 
     for (const other of sessionWindow.tabs) {
@@ -1187,7 +1213,7 @@
       await nextFrame();
       await nextFrame();
       fitTab(target);
-      repairTerminalViewport(target, { scrollToBottom: target.scrollToBottomOnReveal });
+      repairTerminalViewport(target, { scrollToBottom: shouldScrollToBottomOnLayout(target, opts) });
       if (opts.focus) {
         try { target.term.focus(); } catch {}
       }
@@ -1257,6 +1283,7 @@
 
     tab._suppressExitEvent = true;
     try { await api.closeTerminal(tab.id); } catch {}
+    disposeTerminalViewportTracking(tab);
     try { tab.term.dispose(); } catch {}
 
     if (tab.tabChipEl && tab.tabChipEl.parentNode) tab.tabChipEl.parentNode.removeChild(tab.tabChipEl);
@@ -1345,31 +1372,43 @@
   }
 
   function minimizeSessionWindow(sessionWindow, sourceCard) {
-    if (sessionWindow.minimized) return;
+    if (sessionWindow.minimized || sessionWindow._minimizing) return;
+    sessionWindow._minimizing = true;
     closeNewTabMenu(sessionWindow, { restoreFocus: false });
-    const activeTab = getActiveTab(sessionWindow);
-    if (activeTab) activeTab.needsViewportRefresh = true;
+    markSessionWindowForRevealRepair(sessionWindow);
     const card = sourceCard || findCard(sessionWindow.folderPath);
     setAnimationTarget(sessionWindow.windowEl, card, '--to-x', '--to-y');
     sessionWindow.windowEl.classList.remove('opening');
     sessionWindow.windowEl.classList.add('minimizing');
-    sessionWindow.windowEl.addEventListener('animationend', function handleEnd() {
-      sessionWindow.windowEl.removeEventListener('animationend', handleEnd);
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      sessionWindow.windowEl.removeEventListener('animationend', finish);
       sessionWindow.windowEl.classList.remove('minimizing');
       sessionWindow.windowEl.hidden = true;
       sessionWindow.minimized = true;
+      sessionWindow._minimizing = false;
       renderGrid();
-    });
+    };
+    const timer = setTimeout(finish, 500);
+    sessionWindow.windowEl.addEventListener('animationend', finish);
   }
 
   function restoreSessionWindow(sessionWindow, sourceCard) {
     sessionWindow.windowEl.hidden = false;
     sessionWindow.minimized = false;
+    sessionWindow._minimizing = false;
     clearSessionAttention(sessionWindow);
     animateOpen(sessionWindow, sourceCard || findCard(sessionWindow.folderPath));
     renderGrid();
     const tab = getActiveTab(sessionWindow);
-    if (tab) fitAfterStableLayout(tab, { focus: true, waitForAnimation: true });
+    if (tab) {
+      const scrollToBottom = shouldScrollToBottomOnLayout(tab, { scrollToBottom: tab.scrollToBottomOnReveal });
+      repairTerminalViewportSoon(tab, { scrollToBottom });
+      fitAfterStableLayout(tab, { focus: true, waitForAnimation: true, scrollToBottom });
+    }
   }
 
   async function requestCloseSessionWindow(sessionWindow, options) {
@@ -1413,6 +1452,7 @@
     for (const tab of tabs) {
       tab._suppressExitEvent = true;
       try { await api.closeTerminal(tab.id); } catch {}
+      disposeTerminalViewportTracking(tab);
       try { tab.term.dispose(); } catch {}
       state.tabsById.delete(tab.id);
     }
@@ -1481,11 +1521,129 @@
     element.style.setProperty(yVar, `${targetY - ownY}px`);
   }
 
+  function handleWindowLifecycle(payload) {
+    const type = payload && payload.type;
+    if (type === 'hidden') {
+      state.windowRenderable = false;
+      markVisibleTerminalViewportsForReveal();
+      return;
+    }
+    if (type === 'visible' || type === 'focus') {
+      state.windowRenderable = true;
+      refreshVisibleTerminalViewports({ reason: type });
+    }
+  }
+
+  function refreshVisibleTerminalViewports(options) {
+    const opts = options || {};
+    for (const sessionWindow of state.windowsByPath.values()) {
+      const tab = getActiveTab(sessionWindow);
+      if (!tab) continue;
+      if (!isTabVisible(tab)) {
+        if (!sessionWindow.minimized && !sessionWindow.windowEl.hidden) {
+          markTabForRevealRepair(tab, { scrollToBottom: tab.scrollToBottomOnReveal });
+        }
+        continue;
+      }
+      scheduleStableFit(tab, {
+        scrollToBottom: shouldScrollToBottomOnLayout(tab, opts),
+      });
+    }
+  }
+
+  function markVisibleTerminalViewportsForReveal() {
+    for (const sessionWindow of state.windowsByPath.values()) {
+      if (sessionWindow.windowEl.hidden) continue;
+      markSessionWindowForRevealRepair(sessionWindow);
+    }
+  }
+
+  function markSessionWindowForRevealRepair(sessionWindow) {
+    if (!sessionWindow || !sessionWindow.tabs) return;
+    for (const tab of sessionWindow.tabs) {
+      snapshotTabBeforeHide(tab);
+    }
+  }
+
+  function snapshotTabBeforeHide(tab) {
+    if (!tab) return;
+    const atBottom = isTerminalAtBottom(tab);
+    tab.lastKnownAtBottom = atBottom;
+    markTabForRevealRepair(tab, { scrollToBottom: atBottom || tab.scrollToBottomOnReveal });
+  }
+
+  function markTabForRevealRepair(tab, options) {
+    if (!tab) return;
+    const opts = options || {};
+    tab.needsViewportRefresh = true;
+    if (opts.scrollToBottom) {
+      tab.scrollToBottomOnReveal = true;
+      tab.lastKnownAtBottom = true;
+    }
+  }
+
+  function shouldScrollToBottomOnLayout(tab, options) {
+    if (!tab) return false;
+    const opts = options || {};
+    return !!opts.scrollToBottom
+      || !!tab.scrollToBottomOnReveal
+      || tab.lastKnownAtBottom === true
+      || isTerminalAtBottom(tab);
+  }
+
+  function isTerminalAtBottom(tab) {
+    if (!tab || !tab.term) return true;
+    try {
+      const buffer = tab.term.buffer && tab.term.buffer.active;
+      if (buffer && typeof buffer.viewportY === 'number' && typeof buffer.baseY === 'number') {
+        return buffer.viewportY >= buffer.baseY;
+      }
+    } catch {}
+    try {
+      const viewport = tab.terminalEl && tab.terminalEl.querySelector('.xterm-viewport');
+      if (!viewport) return tab.lastKnownAtBottom !== false;
+      const remaining = viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop;
+      return remaining <= 2;
+    } catch {}
+    return tab.lastKnownAtBottom !== false;
+  }
+
+  function attachTerminalViewportTracking(tab) {
+    if (!tab || !tab.term) return;
+    try {
+      tab.terminalDisposables.push(tab.term.onScroll(() => {
+        tab.lastKnownAtBottom = isTerminalAtBottom(tab);
+      }));
+    } catch {}
+    try {
+      tab.terminalDisposables.push(tab.term.onResize(() => {
+        if (isTabVisible(tab)) {
+          repairTerminalViewportSoon(tab, { scrollToBottom: shouldScrollToBottomOnLayout(tab) });
+        } else {
+          markTabForRevealRepair(tab, { scrollToBottom: tab.scrollToBottomOnReveal });
+        }
+      }));
+    } catch {}
+  }
+
+  function disposeTerminalViewportTracking(tab) {
+    if (!tab || !Array.isArray(tab.terminalDisposables)) return;
+    for (const disposable of tab.terminalDisposables.splice(0)) {
+      try { disposable.dispose(); } catch {}
+    }
+  }
+
+  function repairTerminalViewportSoon(tab, options) {
+    const opts = options || {};
+    requestAnimationFrame(() => repairTerminalViewport(tab, opts));
+    setTimeout(() => repairTerminalViewport(tab, opts), 120);
+  }
+
   function observeSessionSize(sessionWindow) {
     if (sessionWindow.resizeObserver || typeof ResizeObserver !== 'function') return;
     sessionWindow.resizeObserver = new ResizeObserver(() => {
       const tab = getActiveTab(sessionWindow);
-      if (tab) scheduleStableFit(tab);
+      if (tab) scheduleStableFit(tab, { scrollToBottom: shouldScrollToBottomOnLayout(tab) });
     });
     sessionWindow.resizeObserver.observe(sessionWindow.terminalPocketEl);
   }
@@ -1509,17 +1667,20 @@
     await waitForFonts();
     await nextFrame();
     await nextFrame();
+    if (!isTabVisible(tab)) {
+      markTabForRevealRepair(tab, { scrollToBottom: opts.scrollToBottom });
+      return;
+    }
+    const scrollToBottom = shouldScrollToBottomOnLayout(tab, opts);
     fitTab(tab);
     repairTerminalViewport(tab, {
-      scrollToBottom: opts.scrollToBottom || tab.scrollToBottomOnReveal,
+      scrollToBottom,
     });
     if (opts.focus) tab.term.focus();
   }
 
   function fitTab(tab) {
-    const sessionWindow = tab.sessionWindow;
-    if (sessionWindow.minimized || sessionWindow.windowEl.hidden) return;
-    if (tab.terminalEl && tab.terminalEl.hidden) return;
+    if (!isTabVisible(tab)) return;
     try {
       tab.fitAddon.fit();
       api.resizeTerminal(tab.id, tab.term.cols, tab.term.rows);
@@ -1529,28 +1690,43 @@
   function isTabVisible(tab) {
     if (!tab || !tab.sessionWindow || !tab.terminalEl) return false;
     const sessionWindow = tab.sessionWindow;
-    return !sessionWindow.minimized
+    return state.windowRenderable !== false
+      && document.visibilityState !== 'hidden'
+      && !sessionWindow.minimized
+      && !sessionWindow._minimizing
       && !sessionWindow.windowEl.hidden
-      && !tab.terminalEl.hidden;
+      && !tab.terminalEl.hidden
+      && sessionWindow.windowEl.isConnected
+      && tab.terminalEl.isConnected;
   }
 
   function repairTerminalViewport(tab, options) {
-    if (!isTabVisible(tab)) return;
     const opts = options || {};
-    const shouldScroll = !!opts.scrollToBottom;
+    if (!isTabVisible(tab)) {
+      markTabForRevealRepair(tab, { scrollToBottom: opts.scrollToBottom });
+      return;
+    }
+    const shouldScroll = shouldScrollToBottomOnLayout(tab, opts);
     refreshTerminalViewport(tab, shouldScroll);
     requestAnimationFrame(() => refreshTerminalViewport(tab, shouldScroll));
+    setTimeout(() => refreshTerminalViewport(tab, shouldScroll), 80);
     tab.needsViewportRefresh = false;
     tab.scrollToBottomOnReveal = false;
+    tab.lastKnownAtBottom = shouldScroll || isTerminalAtBottom(tab);
   }
 
   function refreshTerminalViewport(tab, scrollToBottom) {
     if (!isTabVisible(tab)) return;
     try {
       if (scrollToBottom) tab.term.scrollToBottom();
+      try { tab.term.clearTextureAtlas(); } catch {}
       tab.term.refresh(0, Math.max(0, tab.term.rows - 1));
       const viewport = tab.terminalEl.querySelector('.xterm-viewport');
-      if (scrollToBottom && viewport) viewport.scrollTop = viewport.scrollHeight;
+      if (scrollToBottom && viewport) {
+        viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      }
+      if (scrollToBottom) tab.term.scrollToBottom();
+      tab.lastKnownAtBottom = scrollToBottom || isTerminalAtBottom(tab);
     } catch {}
   }
 

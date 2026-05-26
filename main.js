@@ -153,6 +153,15 @@ function createWindow() {
 
   win.setMenuBarVisibility(false);
   win.once('ready-to-show', () => win.show());
+  const sendWindowLifecycle = (type) => {
+    if (win.isDestroyed()) return;
+    win.webContents.send('app:window-lifecycle', { type });
+  };
+  win.on('minimize', () => sendWindowLifecycle('hidden'));
+  win.on('hide', () => sendWindowLifecycle('hidden'));
+  win.on('restore', () => sendWindowLifecycle('visible'));
+  win.on('show', () => sendWindowLifecycle('visible'));
+  win.on('focus', () => sendWindowLifecycle('focus'));
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 

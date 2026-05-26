@@ -18,6 +18,11 @@ contextBridge.exposeInMainWorld('ezvibes', {
     ipcRenderer.on('terminal:exit', listener);
     return () => ipcRenderer.removeListener('terminal:exit', listener);
   },
+  onWindowLifecycle: (callback) => {
+    const listener = (_, payload) => callback(payload);
+    ipcRenderer.on('app:window-lifecycle', listener);
+    return () => ipcRenderer.removeListener('app:window-lifecycle', listener);
+  },
   readClipboard: () => ipcRenderer.invoke('clipboard:read'),
   writeClipboard: (text) => ipcRenderer.invoke('clipboard:write', text),
   getPathForFile: (file) => webUtils.getPathForFile(file),
