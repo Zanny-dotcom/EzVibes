@@ -454,9 +454,16 @@
     api.onTerminalData(({ sessionId, data }) => {
       const tab = state.tabsById.get(sessionId);
       if (!tab) return;
-      tab.term.write(data);
-      if (!isTabVisible(tab)) {
+      const visible = isTabVisible(tab);
+      const followBottom = visible && shouldFollowTerminalOutput(tab);
+      tab.lastOutputAt = Date.now();
+      tab.term.write(data, () => {
+        if (followBottom) queueTerminalOutputFollow(tab);
+      });
+      if (!visible) {
         markTabForRevealRepair(tab, { scrollToBottom: true });
+      } else if (followBottom) {
+        tab.lastKnownAtBottom = true;
       }
       handleTerminalOutput(tab, data);
     });
@@ -761,6 +768,8 @@
   const TERMINAL_LAYOUT_MAX_FRAMES = 18;
   const TERMINAL_MIN_HOST_WIDTH = 20;
   const TERMINAL_MIN_HOST_HEIGHT = 20;
+  const TERMINAL_RECENT_OUTPUT_MS = 2500;
+  const TERMINAL_SCROLL_RESUME_INTENT_PX = 1200;
 
   function makeId() {
     return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
@@ -1391,6 +1400,12 @@
       lastPtyRows: null,
       ptyCreated: false,
       visibleRepairSeq: 0,
+      outputFollowQueued: false,
+      outputFollowTimer: null,
+      outputFollowToken: 0,
+      lastOutputAt: 0,
+      downScrollIntent: 0,
+      downScrollIntentTimer: null,
       terminalDisposables: [],
       term,
       fitAddon,
@@ -1831,6 +1846,13 @@
       || isTerminalAtBottom(tab);
   }
 
+  function shouldFollowTerminalOutput(tab) {
+    if (!tab) return false;
+    return tab.scrollToBottomOnReveal
+      || tab.lastKnownAtBottom === true
+      || isTerminalAtBottom(tab);
+  }
+
   function isTerminalAtBottom(tab) {
     if (!tab || !tab.term) return true;
     try {
@@ -1848,12 +1870,115 @@
     return tab.lastKnownAtBottom !== false;
   }
 
+  function queueTerminalOutputFollow(tab) {
+    if (!tab) return;
+    tab.lastKnownAtBottom = true;
+    const token = (tab.outputFollowToken || 0) + 1;
+    tab.outputFollowToken = token;
+    if (!tab.outputFollowQueued) {
+      tab.outputFollowQueued = true;
+      requestAnimationFrame(() => {
+        tab.outputFollowQueued = false;
+        if (tab.outputFollowToken !== token) return;
+        scrollTerminalToBottom(tab);
+      });
+    }
+    if (tab.outputFollowTimer) clearTimeout(tab.outputFollowTimer);
+    tab.outputFollowTimer = setTimeout(() => {
+      tab.outputFollowTimer = null;
+      if (tab.outputFollowToken !== token) return;
+      scrollTerminalToBottom(tab);
+    }, 80);
+  }
+
+  function cancelTerminalOutputFollow(tab) {
+    if (!tab) return;
+    tab.outputFollowToken = (tab.outputFollowToken || 0) + 1;
+    if (tab.outputFollowTimer) {
+      clearTimeout(tab.outputFollowTimer);
+      tab.outputFollowTimer = null;
+    }
+    tab.outputFollowQueued = false;
+  }
+
+  function trackTerminalWheelIntent(tab, event) {
+    if (!tab) return;
+    const deltaY = Number(event && event.deltaY) || 0;
+    if (deltaY < 0) {
+      cancelTerminalOutputFollow(tab);
+      tab.downScrollIntent = 0;
+      return;
+    }
+    if (deltaY <= 0 || !isTabVisible(tab) || isTerminalAtBottom(tab)) return;
+    if (Date.now() - (tab.lastOutputAt || 0) > TERMINAL_RECENT_OUTPUT_MS) return;
+
+    tab.downScrollIntent = Math.min(4000, (tab.downScrollIntent || 0) + deltaY);
+    if (tab.downScrollIntentTimer) clearTimeout(tab.downScrollIntentTimer);
+    tab.downScrollIntentTimer = setTimeout(() => {
+      tab.downScrollIntent = 0;
+      tab.downScrollIntentTimer = null;
+    }, 500);
+
+    setTimeout(() => maybeResumeTerminalOutputFollow(tab), 0);
+  }
+
+  function maybeResumeTerminalOutputFollow(tab) {
+    if (!tab || !isTabVisible(tab)) return;
+    if (isTerminalAtBottom(tab)) {
+      tab.downScrollIntent = 0;
+      return;
+    }
+    const viewport = tab.terminalEl && tab.terminalEl.querySelector('.xterm-viewport');
+    const remaining = getTerminalScrollRemaining(tab);
+    const nearBottomThreshold = Math.max(600, viewport ? viewport.clientHeight * 1.5 : 0);
+    if ((tab.downScrollIntent || 0) < TERMINAL_SCROLL_RESUME_INTENT_PX && remaining > nearBottomThreshold) return;
+
+    tab.downScrollIntent = 0;
+    if (tab.downScrollIntentTimer) {
+      clearTimeout(tab.downScrollIntentTimer);
+      tab.downScrollIntentTimer = null;
+    }
+    queueTerminalOutputFollow(tab);
+  }
+
+  function getTerminalScrollRemaining(tab) {
+    try {
+      const viewport = tab.terminalEl && tab.terminalEl.querySelector('.xterm-viewport');
+      if (!viewport) return Infinity;
+      return Math.max(0, viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop);
+    } catch {}
+    return Infinity;
+  }
+
+  function scrollTerminalToBottom(tab) {
+    if (!isTabVisible(tab)) {
+      markTabForRevealRepair(tab, { scrollToBottom: true });
+      return;
+    }
+    try {
+      tab.term.scrollToBottom();
+      const viewport = tab.terminalEl && tab.terminalEl.querySelector('.xterm-viewport');
+      if (viewport) {
+        viewport.scrollTop = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      }
+      tab.term.scrollToBottom();
+      tab.lastKnownAtBottom = true;
+    } catch {}
+  }
+
   function attachTerminalViewportTracking(tab) {
     if (!tab || !tab.term) return;
     try {
       tab.terminalDisposables.push(tab.term.onScroll(() => {
         tab.lastKnownAtBottom = isTerminalAtBottom(tab);
       }));
+    } catch {}
+    try {
+      const onWheel = (event) => trackTerminalWheelIntent(tab, event);
+      tab.terminalEl.addEventListener('wheel', onWheel, { passive: true });
+      tab.terminalDisposables.push({
+        dispose: () => tab.terminalEl.removeEventListener('wheel', onWheel),
+      });
     } catch {}
     try {
       tab.terminalDisposables.push(tab.term.onResize(() => {
@@ -1868,6 +1993,17 @@
 
   function disposeTerminalViewportTracking(tab) {
     if (!tab || !Array.isArray(tab.terminalDisposables)) return;
+    if (tab.outputFollowTimer) {
+      clearTimeout(tab.outputFollowTimer);
+      tab.outputFollowTimer = null;
+    }
+    if (tab.downScrollIntentTimer) {
+      clearTimeout(tab.downScrollIntentTimer);
+      tab.downScrollIntentTimer = null;
+    }
+    tab.outputFollowQueued = false;
+    tab.outputFollowToken = (tab.outputFollowToken || 0) + 1;
+    tab.downScrollIntent = 0;
     for (const disposable of tab.terminalDisposables.splice(0)) {
       try { disposable.dispose(); } catch {}
     }
