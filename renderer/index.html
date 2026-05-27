@@ -13,40 +13,40 @@
   </head>
   <body>
     <div id="app">
-      <header class="topbar">
-        <div class="window-title">EZvibes</div>
-        <div class="nav-buttons">
-          <button id="back-btn" class="icon-button" title="Back">‹</button>
-          <button id="up-btn" class="icon-button" title="Up">↑</button>
-          <button id="refresh-btn" class="icon-button" title="Refresh">↻</button>
+      <header class="topbar" data-panel-id="topbar">
+        <div class="window-title" data-panel-id="window-title">EZvibes</div>
+        <div class="nav-buttons" data-panel-id="nav-buttons-group">
+          <button id="back-btn" class="icon-button" title="Back" data-panel-id="back-btn">‹</button>
+          <button id="up-btn" class="icon-button" title="Up" data-panel-id="up-btn">↑</button>
+          <button id="refresh-btn" class="icon-button" title="Refresh" data-panel-id="refresh-btn">↻</button>
         </div>
-        <div id="path-bar" class="path-bar"></div>
+        <div id="path-bar" class="path-bar" data-panel-id="path-bar"></div>
         <div class="search-wrap">
-          <input id="search-input" type="search" placeholder="Search folders" />
+          <input id="search-input" type="search" placeholder="Search folders" data-panel-id="search-input" />
         </div>
-        <button id="narration-toggle" class="icon-button narration-toggle" title="What Was Made" aria-pressed="false">▤</button>
+        <button id="narration-toggle" class="icon-button narration-toggle" title="What Was Made" aria-pressed="false" data-panel-id="narration-toggle">▤</button>
         <button id="panel-mode-toggle" class="icon-button panel-mode-toggle" title="Panel Mode" aria-pressed="false" data-panel-id="panel-mode-toggle">◫</button>
-        <button id="live-log-toggle" class="icon-button live-log-toggle" title="Live Log" aria-pressed="false">LOG</button>
+        <button id="live-log-toggle" class="icon-button live-log-toggle" title="Live Log" aria-pressed="false" data-panel-id="live-log-toggle">LOG</button>
       </header>
 
       <main class="shell">
-        <aside class="sidebar">
-          <button id="active-sessions-btn" class="quick-path active-sessions-link" type="button">
+        <aside class="sidebar" data-panel-id="sidebar">
+          <button id="active-sessions-btn" class="quick-path active-sessions-link" type="button" data-panel-id="active-sessions-btn">
             ACTIVE SESSIONS
           </button>
           <div class="sidebar-section-title">Places</div>
-          <div id="quick-paths"></div>
+          <div id="quick-paths" data-panel-id="quick-paths-list"></div>
         </aside>
 
-        <section class="content">
-          <div class="command-bar">
-            <button id="new-session-btn" class="command-button">Launch Claude Here</button>
-            <div id="folder-count" class="folder-count"></div>
+        <section class="content" data-panel-id="content">
+          <div class="command-bar" data-panel-id="command-bar">
+            <button id="new-session-btn" class="command-button" data-panel-id="new-session-btn">Launch Claude Here</button>
+            <div id="folder-count" class="folder-count" data-panel-id="folder-count"></div>
           </div>
-          <div id="grid" class="folder-grid"></div>
+          <div id="grid" class="folder-grid" data-panel-id="folder-grid"></div>
         </section>
 
-        <aside id="narration-sidebar" class="narration-sidebar" hidden>
+        <aside id="narration-sidebar" class="narration-sidebar" hidden data-panel-id="narration-sidebar">
           <div class="narration-header">
             <div>
               <div class="narration-title">What Was Made</div>
@@ -57,7 +57,7 @@
           <div id="narration-body" class="narration-body"></div>
         </aside>
 
-        <aside id="live-log-panel" class="live-log-panel" hidden>
+        <aside id="live-log-panel" class="live-log-panel" hidden data-panel-id="live-log-panel">
           <div class="live-log-header">
             <div>
               <div class="live-log-title">Live Log</div>
