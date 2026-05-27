@@ -597,6 +597,7 @@
     for (const entry of entries) {
       const card = document.createElement('button');
       card.className = `folder-card ${entry.kind === 'directory' ? 'is-folder' : 'is-file'}`;
+      card.setAttribute('data-panel-id', 'folder-card');
       card.dataset.path = entry.path;
       card.title = entry.path;
 
@@ -1184,6 +1185,7 @@
     const windowEl = document.createElement('section');
     windowEl.className = 'folder-terminal';
     windowEl.dataset.windowId = windowId;
+    windowEl.setAttribute('data-panel-id', 'session-window');
     windowEl.innerHTML = `
       <div class="folder-terminal-tab-strip" role="tablist" aria-label="Agent sessions"></div>
       <div class="folder-terminal-tab">
@@ -1199,10 +1201,14 @@
     `;
 
     const folderNameLabel = windowEl.querySelector('.folder-name-label');
+    folderNameLabel.setAttribute('data-panel-id', 'session-window-folder-name-label');
     folderNameLabel.textContent = name;
     folderNameLabel.title = folderPath;
 
     const tabStripEl = windowEl.querySelector('.folder-terminal-tab-strip');
+    tabStripEl.setAttribute('data-panel-id', 'session-window-tab-strip');
+    windowEl.querySelector('.folder-terminal-tab').setAttribute('data-panel-id', 'session-window-header');
+    windowEl.querySelector('.session-controls').setAttribute('data-panel-id', 'session-window-controls');
     const addTabBtnEl = document.createElement('button');
     addTabBtnEl.type = 'button';
     addTabBtnEl.className = 'folder-terminal-tab-add';
@@ -1210,10 +1216,12 @@
     addTabBtnEl.setAttribute('aria-label', 'New terminal tab');
     addTabBtnEl.setAttribute('aria-haspopup', 'menu');
     addTabBtnEl.setAttribute('aria-expanded', 'false');
+    addTabBtnEl.setAttribute('data-panel-id', 'session-window-add-tab');
     addTabBtnEl.textContent = '+';
     tabStripEl.appendChild(addTabBtnEl);
 
     const terminalPocketEl = windowEl.querySelector('.terminal-pocket');
+    terminalPocketEl.setAttribute('data-panel-id', 'terminal-pocket');
     const terminalEl = windowEl.querySelector('.terminal-host');
     els.sessionLayer.appendChild(windowEl);
 
@@ -1287,6 +1295,7 @@
     const opts = options || {};
     const chip = document.createElement('div');
     chip.className = 'folder-terminal-tab-chip';
+    chip.setAttribute('data-panel-id', 'session-window-tab-chip');
     if (opts.active) chip.classList.add('is-active');
     chip.setAttribute('role', 'presentation');
     chip.dataset.tabId = tab.id;
