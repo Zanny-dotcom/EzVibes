@@ -3,9 +3,13 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { pathToFileURL } = require('url');
+const { spawn } = require('child_process');
 const pty = require('node-pty');
 
 const projectRoot = __dirname;
+const ACTIVATE_DIR_PATH = path.join(projectRoot, 'activate');
+const ACTIVATE_FILE_PATH = path.join(ACTIVATE_DIR_PATH, 'Ezvibes.md');
+const INBOX_DIR_PATH = path.join(projectRoot, 'inbox');
 const APP_USER_MODEL_ID = 'com.ezvibes.app';
 const APP_ICON_PATH = path.join(__dirname, 'renderer', 'ezvibes.ico');
 const APP_INDEX_PATH = path.join(__dirname, 'renderer', 'index.html');
@@ -138,6 +142,27 @@ function writeLog(level, event, details = {}) {
   } catch {}
 
   return entry;
+}
+
+function ensureActivateFile() {
+  fs.mkdirSync(ACTIVATE_DIR_PATH, { recursive: true });
+  if (!fs.existsSync(ACTIVATE_FILE_PATH)) {
+    fs.writeFileSync(ACTIVATE_FILE_PATH, '', 'utf8');
+  }
+  return ACTIVATE_FILE_PATH;
+}
+
+function openActivateFileInNotepad() {
+  const filePath = ensureActivateFile();
+  const child = spawn('notepad.exe', [filePath], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.once('error', (error) => {
+    writeLog('error', 'activate.notepad_spawn_error', { error, filePath });
+  });
+  child.unref();
+  return filePath;
 }
 
 function countSessionsForWebContents(ownerWebContentsId) {
@@ -639,6 +664,31 @@ function listDirectory(inputPath) {
   return { path: dir, parent: path.dirname(dir), entries };
 }
 
+function listInboxMarkdownFiles() {
+  fs.mkdirSync(INBOX_DIR_PATH, { recursive: true });
+  const names = fs.readdirSync(INBOX_DIR_PATH, { withFileTypes: true });
+  const entries = names
+    .filter((entry) => entry.isFile() && path.extname(entry.name).toLowerCase() === '.md')
+    .map((entry) => {
+      const fullPath = path.join(INBOX_DIR_PATH, entry.name);
+      let stat = null;
+      try {
+        stat = fs.statSync(fullPath);
+      } catch {}
+      const ext = path.extname(entry.name);
+      const displayName = path.basename(entry.name, ext) || entry.name;
+      return {
+        name: entry.name,
+        displayName,
+        path: fullPath,
+        size: stat ? stat.size : 0,
+        mtimeMs: stat ? stat.mtimeMs : 0,
+      };
+    });
+  entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  return { path: INBOX_DIR_PATH, entries };
+}
+
 function quickPaths() {
   const home = os.homedir();
   const candidates = [
@@ -802,6 +852,18 @@ function registerIpcHandlers() {
       Object.assign({}, (payload && payload.details) || {}, { senderWebContentsId: event.sender.id })
     );
   });
+  ipcMain.handle('activate:file-path', () => ensureActivateFile());
+  ipcMain.handle('activate:open-file', () => {
+    try {
+      const filePath = openActivateFileInNotepad();
+      writeLog('info', 'activate.opened', { filePath });
+      return { success: true, path: filePath };
+    } catch (error) {
+      writeLog('error', 'activate.open_failed', { error });
+      return { success: false, error: (error && error.message) || String(error) };
+    }
+  });
+  ipcMain.handle('inbox:list-markdown', () => listInboxMarkdownFiles());
   ipcMain.handle('fs:list-directory', (_, folderPath) => listDirectory(folderPath));
 
   ipcMain.handle('terminal:create', (event, payload) => {
@@ -1029,6 +1091,11 @@ app.whenReady().then(() => {
     chromeVersion: process.versions.chrome,
     nodeVersion: process.versions.node,
   });
+  try {
+    ensureActivateFile();
+  } catch (error) {
+    writeLog('error', 'activate.ensure_failed', { error });
+  }
   Menu.setApplicationMenu(null);
   registerPermissionHandlers();
   registerIpcHandlers();

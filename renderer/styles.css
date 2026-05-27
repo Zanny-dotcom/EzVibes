@@ -197,6 +197,284 @@ button {
   border-color: var(--accent);
 }
 
+.inbox-button {
+  min-width: 72px;
+  padding: 0 16px;
+  border-color: rgba(255, 255, 255, 0.78);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), 0 4px 12px rgba(0, 0, 0, 0.14);
+}
+
+.inbox-button:hover {
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.inbox-button.is-open {
+  border-color: rgba(255, 255, 255, 0.96);
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.inbox-button.is-detached,
+.inbox-file-button.is-detached {
+  opacity: 0.48;
+  transform: scale(0.96);
+}
+
+body.inbox-path-dragging,
+body.inbox-path-dragging * {
+  cursor: grabbing !important;
+}
+
+.inbox-drag-ghost {
+  position: fixed;
+  z-index: 160;
+  width: 176px;
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 1px solid rgba(178, 112, 255, 0.48);
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 22% 0%, rgba(255, 255, 255, 0.22), transparent 34%),
+    linear-gradient(135deg, rgba(42, 27, 58, 0.96), rgba(10, 13, 16, 0.98));
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.48),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  color: #fff;
+  pointer-events: none;
+  transform: translate(-50%, -50%) rotate(-2deg);
+  backdrop-filter: blur(18px) saturate(1.25);
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
+}
+
+.inbox-drag-ghost-label,
+.inbox-drag-ghost-path {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-text-stroke: 0.25px rgba(178, 112, 255, 0.82);
+  text-shadow: 0 0 1px rgba(178, 112, 255, 0.42);
+}
+
+.inbox-drag-ghost-label {
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.inbox-drag-ghost-path {
+  margin-top: 2px;
+  color: rgba(238, 247, 255, 0.7);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.inbox-popover {
+  position: fixed;
+  z-index: 95;
+  width: min(430px, calc(100vw - 24px));
+  max-height: min(520px, calc(100vh - 84px));
+  color: #f8fbff;
+  filter: drop-shadow(0 28px 64px rgba(0, 0, 0, 0.48));
+}
+
+.inbox-popover[hidden] {
+  display: none;
+}
+
+.inbox-glass {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  max-height: inherit;
+  min-height: 178px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.2), transparent 34%),
+    linear-gradient(135deg, rgba(43, 31, 58, 0.94), rgba(28, 40, 48, 0.95) 42%, rgba(8, 11, 13, 0.98));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(24px) saturate(1.32);
+  -webkit-backdrop-filter: blur(24px) saturate(1.32);
+}
+
+.inbox-title,
+.inbox-subtitle,
+.inbox-count,
+.inbox-file-name,
+.inbox-empty {
+  -webkit-text-stroke: 0.25px rgba(178, 112, 255, 0.78);
+  paint-order: stroke fill;
+  text-shadow: 0 0 1px rgba(178, 112, 255, 0.42);
+}
+
+.inbox-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 8px;
+}
+
+.inbox-heading {
+  min-width: 0;
+}
+
+.inbox-title {
+  font-size: 16px;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.inbox-subtitle {
+  margin-top: 4px;
+  max-width: 100%;
+  color: rgba(238, 247, 255, 0.72);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inbox-close {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  cursor: pointer;
+}
+
+.inbox-close:hover,
+.inbox-close:focus-visible {
+  border-color: rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.18);
+  outline: none;
+}
+
+.inbox-meta {
+  display: flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 16px 8px;
+}
+
+.inbox-count {
+  color: rgba(238, 247, 255, 0.72);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.inbox-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 8px 10px;
+  scrollbar-gutter: stable;
+}
+
+.inbox-list {
+  display: grid;
+  gap: 4px;
+}
+
+.inbox-file-button {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fbff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.inbox-file-button:hover,
+.inbox-file-button:focus-visible {
+  border-color: rgba(255, 255, 255, 0.34);
+  background: rgba(178, 112, 255, 0.18);
+  outline: none;
+}
+
+.inbox-file-name {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.inbox-empty {
+  padding: 24px 12px 28px;
+  color: rgba(238, 247, 255, 0.74);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: center;
+}
+
+.inbox-error {
+  color: #ffd0cb;
+}
+
+.inbox-toast {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 140;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 10px 13px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 10px;
+  background: rgba(19, 25, 26, 0.82);
+  color: #f8fbff;
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.inbox-toast[hidden] {
+  display: none;
+}
+
+.inbox-toast.is-success {
+  border-color: rgba(90, 247, 142, 0.36);
+  color: #c4ffd2;
+}
+
+.inbox-toast.is-error {
+  border-color: rgba(255, 95, 87, 0.38);
+  color: #ffd0cb;
+}
+
+.activate-button {
+  min-width: 96px;
+  border-color: rgba(90, 247, 142, 0.72);
+  background: rgba(90, 247, 142, 0.12);
+  color: #b5ffc8;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.activate-button:hover {
+  border-color: #5af78e;
+  background: rgba(90, 247, 142, 0.2);
+  color: #ffffff;
+}
+
 .folder-count {
   color: var(--muted);
   font-size: 13px;

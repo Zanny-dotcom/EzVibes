@@ -17,13 +17,15 @@
     ['sidebar', { name: 'Sidebar', file: 'renderer/index.html', line: '32-38', describe: 'Left rail: ACTIVE SESSIONS link plus the Places quick-paths.' }],
     ['active-sessions-btn', { name: 'Active sessions link', file: 'renderer/index.html', line: '33-35', describe: 'The green ACTIVE SESSIONS link at the top of the sidebar.' }],
     ['quick-paths-list', { name: 'Places list', file: 'renderer/index.html', line: '37', describe: 'Dynamic quick-paths under Places (Home, Desktop, Documents, and others).' }],
-    ['content', { name: 'Content area', file: 'renderer/index.html', line: '40-46', describe: 'Center pane containing the command bar and the folder grid.' }],
-    ['command-bar', { name: 'Command bar', file: 'renderer/index.html', line: '41-44', describe: 'Strip above the folder grid: Launch Claude Here button plus item count.' }],
-    ['new-session-btn', { name: 'Launch Claude Here button', file: 'renderer/index.html', line: '42', describe: 'Button that starts a Claude session in the current folder.' }],
-    ['folder-count', { name: 'Folder count', file: 'renderer/index.html', line: '43', describe: 'Text showing the number of items in the current folder.' }],
-    ['folder-grid', { name: 'Folder grid', file: 'renderer/index.html', line: '45', describe: 'Grid of folder/file cards in the current directory.' }],
-    ['narration-sidebar', { name: 'Narration sidebar', file: 'renderer/index.html', line: '48-57', describe: 'Right-side "What Was Made" panel; visible when narration toggle is on.' }],
-    ['live-log-panel', { name: 'Live-log drawer', file: 'renderer/index.html', line: '59-68', describe: 'Fixed drawer that shows recent diagnostic events; opened by the LOG button.' }],
+    ['content', { name: 'Content area', file: 'renderer/index.html', line: '41-48', describe: 'Center pane containing the command bar and the folder grid.' }],
+    ['command-bar', { name: 'Command bar', file: 'renderer/index.html', line: '42-47', describe: 'Strip above the folder grid: Launch Claude Here button, inbox button, ACTIVATE button, and item count.' }],
+    ['new-session-btn', { name: 'Launch Claude Here button', file: 'renderer/index.html', line: '43', describe: 'Button that starts a Claude session in the current folder.' }],
+    ['inbox-btn', { name: 'Inbox button', file: 'renderer/index.html', line: '44', describe: 'White-outlined rounded inbox button in the command bar.' }],
+    ['activate-btn', { name: 'ACTIVATE button', file: 'renderer/index.html', line: '45', describe: 'Button that sends the activate markdown path to the current session, or opens it in Notepad on double-click.' }],
+    ['folder-count', { name: 'Folder count', file: 'renderer/index.html', line: '46', describe: 'Text showing the number of items in the current folder.' }],
+    ['folder-grid', { name: 'Folder grid', file: 'renderer/index.html', line: '48', describe: 'Grid of folder/file cards in the current directory.' }],
+    ['narration-sidebar', { name: 'Narration sidebar', file: 'renderer/index.html', line: '50-59', describe: 'Right-side "What Was Made" panel; visible when narration toggle is on.' }],
+    ['live-log-panel', { name: 'Live-log drawer', file: 'renderer/index.html', line: '61-70', describe: 'Fixed drawer that shows recent diagnostic events; opened by the LOG button.' }],
 
     // Dynamic regions (tagged in renderer/app.js)
     ['folder-card', { name: 'Folder card', file: 'renderer/app.js', line: '~595', describe: 'A single folder/file card in the grid, built per entry by renderGrid().' }],
@@ -198,7 +200,10 @@
       : null;
 
     if (activeTab && activeTab.ptyAlive && api && api.writeTerminal) {
-      const wrapped = `\x1b[200~${payload}\x1b[201~\n`;
+      // Match xterm's paste normalization: terminal apps expect CR for pasted
+      // line breaks and for Enter. Claude drops LF-only bracketed pastes.
+      const terminalPayload = payload.replace(/\r?\n/g, '\r');
+      const wrapped = `\x1b[200~${terminalPayload}\x1b[201~\r`;
       api.writeTerminal(activeTab.id, wrapped);
       return { delivered: 'tab' };
     }

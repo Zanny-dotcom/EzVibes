@@ -16,6 +16,26 @@
     previewPath: '',
     viewMode: 'all',
     windowRenderable: true,
+    lastActiveTabId: '',
+    activateFilePath: '',
+    activateClickTimer: null,
+    inboxOpen: false,
+    inboxLoading: false,
+    inboxPath: '',
+    inboxEntries: [],
+    inboxError: '',
+    inboxLoadSeq: 0,
+    inboxToastTimer: null,
+    inboxHoldTimer: null,
+    inboxHoldPointerId: null,
+    inboxHoldLastX: 0,
+    inboxHoldLastY: 0,
+    inboxDraggingPath: false,
+    inboxDragGhost: null,
+    inboxDragPayload: null,
+    inboxHoldSourceEl: null,
+    suppressNextInboxClick: false,
+    suppressNextInboxClickTimer: null,
   };
 
   const els = {};
@@ -33,6 +53,13 @@
     els.contextMenu = document.getElementById('context-menu');
     els.sessionLayer = document.getElementById('session-layer');
     els.newSessionBtn = document.getElementById('new-session-btn');
+    els.inboxBtn = document.getElementById('inbox-btn');
+    els.inboxPopover = document.getElementById('inbox-popover');
+    els.inboxClose = document.getElementById('inbox-close');
+    els.inboxSubtitle = document.getElementById('inbox-subtitle');
+    els.inboxCount = document.getElementById('inbox-count');
+    els.inboxBody = document.getElementById('inbox-body');
+    els.activateBtn = document.getElementById('activate-btn');
     els.shell = document.querySelector('main.shell');
     els.narrationToggle = document.getElementById('narration-toggle');
     els.panelModeToggle = document.getElementById('panel-mode-toggle');
@@ -71,6 +98,19 @@
       renderGrid();
     });
     els.newSessionBtn.addEventListener('click', () => launchClaudeForPath(state.currentPath, null));
+    if (els.inboxBtn) {
+      els.inboxBtn.addEventListener('click', onInboxButtonClick);
+      els.inboxBtn.addEventListener('pointerdown', onInboxButtonPointerDown);
+      els.inboxBtn.addEventListener('dragstart', (event) => event.preventDefault());
+    }
+    if (els.inboxClose) {
+      els.inboxClose.addEventListener('click', () => closeInboxPopup({ restoreFocus: true }));
+    }
+    document.addEventListener('mousedown', onInboxDocumentMouseDown, true);
+    if (els.activateBtn) {
+      els.activateBtn.addEventListener('click', onActivateButtonClick);
+      els.activateBtn.addEventListener('dblclick', onActivateButtonDoubleClick);
+    }
     els.activeSessionsBtn.addEventListener('click', () => {
       state.viewMode = 'active-sessions';
       state.previewPath = '';
@@ -110,7 +150,11 @@
     });
     window.addEventListener('click', () => hideContextMenu());
     window.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') hideContextMenu();
+      if (event.key === 'Escape') {
+        hideContextMenu();
+        cancelInboxButtonHold();
+        closeInboxPopup({ restoreFocus: false });
+      }
     });
     window.addEventListener('keydown', (event) => {
       const target = event.target;
@@ -124,7 +168,10 @@
       event.stopPropagation();
       focusTabButton(tab);
     }, true);
-    window.addEventListener('resize', () => refreshVisibleTerminalViewports({ reason: 'resize' }));
+    window.addEventListener('resize', () => {
+      refreshVisibleTerminalViewports({ reason: 'resize' });
+      positionInboxPopup();
+    });
     window.addEventListener('focus', () => {
       state.windowRenderable = true;
       refreshVisibleTerminalViewports({ reason: 'focus' });
@@ -133,7 +180,10 @@
       state.windowRenderable = true;
       refreshVisibleTerminalViewports({ reason: 'pageshow' });
     });
-    window.addEventListener('blur', () => markVisibleTerminalViewportsForReveal());
+    window.addEventListener('blur', () => {
+      cancelInboxButtonHold();
+      markVisibleTerminalViewportsForReveal();
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden') {
         state.windowRenderable = false;
@@ -694,9 +744,521 @@
     els.contextMenu.hidden = true;
   }
 
+  function onInboxButtonPointerDown(event) {
+    beginInboxPathHold(event, {
+      kind: 'folder',
+      label: 'inbox',
+      hint: state.inboxPath || 'drop into chat',
+      sourceEl: els.inboxBtn,
+      suppressInboxClick: true,
+      missingTargetToast: 'Drop on an open Claude/Codex chat.',
+      successLabel: 'Inbox path',
+    }, 200);
+  }
+
+  function onInboxFilePointerDown(event, entry, sourceEl) {
+    const filePath = String((entry && entry.path) || '');
+    if (!filePath) return;
+    const label = getInboxFileDisplayName(entry);
+    beginInboxPathHold(event, {
+      kind: 'file',
+      label,
+      hint: filePath,
+      path: filePath,
+      sourceEl,
+      missingTargetToast: 'Drop this file on an open Claude/Codex chat.',
+      successLabel: label,
+    }, 200);
+  }
+
+  function beginInboxPathHold(event, payload, delayMs) {
+    if (event.button !== undefined && event.button !== 0) return;
+    cancelInboxButtonHold();
+    state.inboxHoldPointerId = event.pointerId;
+    state.inboxHoldLastX = event.clientX;
+    state.inboxHoldLastY = event.clientY;
+    state.inboxDragPayload = payload || null;
+    state.inboxHoldSourceEl = payload && payload.sourceEl ? payload.sourceEl : null;
+    const pointerId = event.pointerId;
+    state.inboxHoldTimer = setTimeout(() => {
+      state.inboxHoldTimer = null;
+      startInboxPathDrag(pointerId);
+    }, delayMs);
+    document.addEventListener('pointermove', onInboxButtonPointerMove, true);
+    document.addEventListener('pointerup', onInboxButtonPointerUp, true);
+    document.addEventListener('pointercancel', onInboxButtonPointerCancel, true);
+  }
+
+  function onInboxButtonPointerMove(event) {
+    if (state.inboxHoldPointerId !== null && event.pointerId !== state.inboxHoldPointerId) return;
+    state.inboxHoldLastX = event.clientX;
+    state.inboxHoldLastY = event.clientY;
+    if (!state.inboxDraggingPath) return;
+    event.preventDefault();
+    event.stopPropagation();
+    updateInboxPathDrag(event.clientX, event.clientY);
+  }
+
+  function onInboxButtonPointerUp(event) {
+    if (state.inboxHoldPointerId !== null && event.pointerId !== state.inboxHoldPointerId) return;
+    const wasDragging = state.inboxDraggingPath;
+    const x = event.clientX;
+    const y = event.clientY;
+    clearInboxHoldTimer();
+    removeInboxHoldListeners();
+    state.inboxHoldPointerId = null;
+
+    if (!wasDragging) {
+      state.inboxDragPayload = null;
+      state.inboxHoldSourceEl = null;
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const target = getInboxPathDragTarget(x, y);
+    const tab = findDropTargetTab(target);
+    const payload = state.inboxDragPayload;
+    cleanupInboxPathDrag();
+    dropInboxPathOnTab(tab, target, payload).catch((error) => {
+      logRendererEvent('renderer.inbox.path_drag_failed', {
+        message: (error && error.message) || String(error),
+      }, 'error');
+      showInboxToast('Could not send inbox path.', 'error');
+    });
+  }
+
+  function onInboxButtonPointerCancel(event) {
+    if (state.inboxHoldPointerId !== null && event.pointerId !== state.inboxHoldPointerId) return;
+    cancelInboxButtonHold();
+  }
+
+  function startInboxPathDrag(pointerId) {
+    if (state.inboxHoldPointerId !== pointerId) return;
+    const payload = state.inboxDragPayload || {};
+    state.inboxDraggingPath = true;
+    if (payload.suppressInboxClick) suppressNextInboxClickBriefly();
+    closeInboxPopup({ restoreFocus: false });
+    if (state.inboxHoldSourceEl) state.inboxHoldSourceEl.classList.add('is-detached');
+    document.body.classList.add('inbox-path-dragging');
+    state.inboxDragGhost = createInboxPathDragGhost();
+    document.body.appendChild(state.inboxDragGhost);
+    updateInboxPathDrag(state.inboxHoldLastX, state.inboxHoldLastY);
+    logRendererEvent('renderer.inbox.path_drag_started', { kind: payload.kind || 'path' });
+  }
+
+  function createInboxPathDragGhost() {
+    const payload = state.inboxDragPayload || {};
+    const ghost = document.createElement('div');
+    ghost.className = 'inbox-drag-ghost';
+    const label = document.createElement('span');
+    label.className = 'inbox-drag-ghost-label';
+    label.textContent = payload.label || 'path';
+    const hint = document.createElement('span');
+    hint.className = 'inbox-drag-ghost-path';
+    hint.textContent = payload.hint || 'drop into chat';
+    ghost.append(label, hint);
+    return ghost;
+  }
+
+  function updateInboxPathDrag(x, y) {
+    if (state.inboxDragGhost) {
+      state.inboxDragGhost.style.left = `${x}px`;
+      state.inboxDragGhost.style.top = `${y}px`;
+    }
+    const target = getInboxPathDragTarget(x, y);
+    updateTerminalDropTarget(findDropTargetTab(target));
+  }
+
+  function getInboxPathDragTarget(x, y) {
+    const px = Math.min(Math.max(0, x), Math.max(0, window.innerWidth - 1));
+    const py = Math.min(Math.max(0, y), Math.max(0, window.innerHeight - 1));
+    return document.elementFromPoint(px, py);
+  }
+
+  function clearInboxHoldTimer() {
+    if (!state.inboxHoldTimer) return;
+    clearTimeout(state.inboxHoldTimer);
+    state.inboxHoldTimer = null;
+  }
+
+  function removeInboxHoldListeners() {
+    document.removeEventListener('pointermove', onInboxButtonPointerMove, true);
+    document.removeEventListener('pointerup', onInboxButtonPointerUp, true);
+    document.removeEventListener('pointercancel', onInboxButtonPointerCancel, true);
+  }
+
+  function cleanupInboxPathDrag() {
+    state.inboxDraggingPath = false;
+    if (state.inboxDragGhost && state.inboxDragGhost.parentNode) {
+      state.inboxDragGhost.parentNode.removeChild(state.inboxDragGhost);
+    }
+    state.inboxDragGhost = null;
+    if (state.inboxHoldSourceEl) state.inboxHoldSourceEl.classList.remove('is-detached');
+    state.inboxDragPayload = null;
+    state.inboxHoldSourceEl = null;
+    document.body.classList.remove('inbox-path-dragging');
+    clearTerminalDropTarget();
+  }
+
+  function cancelInboxButtonHold() {
+    clearInboxHoldTimer();
+    removeInboxHoldListeners();
+    state.inboxHoldPointerId = null;
+    if (state.inboxDraggingPath) {
+      const payload = state.inboxDragPayload || {};
+      cleanupInboxPathDrag();
+      if (payload.suppressInboxClick) suppressNextInboxClickBriefly();
+    } else {
+      state.inboxDragPayload = null;
+      state.inboxHoldSourceEl = null;
+    }
+  }
+
+  function suppressNextInboxClickBriefly() {
+    state.suppressNextInboxClick = true;
+    if (state.suppressNextInboxClickTimer) clearTimeout(state.suppressNextInboxClickTimer);
+    state.suppressNextInboxClickTimer = setTimeout(() => {
+      state.suppressNextInboxClick = false;
+      state.suppressNextInboxClickTimer = null;
+    }, 350);
+  }
+
+  async function getInboxFolderPath() {
+    if (state.inboxPath) return state.inboxPath;
+    if (!api.listInboxMarkdownFiles) throw new Error('Inbox path API is unavailable.');
+    const listing = await api.listInboxMarkdownFiles();
+    const inboxPath = String((listing && listing.path) || '');
+    if (!inboxPath) throw new Error('Inbox path is unavailable.');
+    state.inboxPath = inboxPath;
+    return inboxPath;
+  }
+
+  async function resolveInboxDragPath(payload) {
+    const explicit = String((payload && payload.path) || '');
+    if (explicit) return explicit;
+    return getInboxFolderPath();
+  }
+
+  async function dropInboxPathOnTab(tab, target, payload) {
+    const dragPayload = payload || {};
+    if (!tab) {
+      logRendererEvent('renderer.inbox.path_drag_cancelled', {
+        reason: 'no-drop-target',
+        kind: dragPayload.kind || 'path',
+        target: describeDropTarget(target),
+      }, 'warn');
+      showInboxToast(dragPayload.missingTargetToast || 'Drop on an open Claude/Codex chat.', 'info');
+      return;
+    }
+
+    if (!isTabReadyForInput(tab) || !isTabVisible(tab)) {
+      logRendererEvent('renderer.inbox.path_drag_rejected', {
+        reason: 'tab-not-ready',
+        kind: dragPayload.kind || 'path',
+        sessionId: tab.id,
+        agent: tab.agent,
+      }, 'warn');
+      showInboxToast('That chat is not ready for input.', 'error');
+      return;
+    }
+
+    const pathToSend = await resolveInboxDragPath(dragPayload);
+    markCurrentTab(tab);
+    api.writeTerminal(tab.id, pathToSend);
+    try { tab.term.focus(); } catch {}
+    logRendererEvent('renderer.inbox.path_drag_sent_to_terminal', {
+      path: pathToSend,
+      kind: dragPayload.kind || 'path',
+      sessionId: tab.id,
+      agent: tab.agent,
+      cwd: tab.sessionWindow && tab.sessionWindow.folderPath,
+    });
+    showInboxToast(`${dragPayload.successLabel || 'Path'} sent to ${getAgentLabel(tab)}.`, 'success');
+  }
+
+  function onInboxButtonClick(event) {
+    if (state.suppressNextInboxClick) {
+      event.preventDefault();
+      event.stopPropagation();
+      state.suppressNextInboxClick = false;
+      if (state.suppressNextInboxClickTimer) {
+        clearTimeout(state.suppressNextInboxClickTimer);
+        state.suppressNextInboxClickTimer = null;
+      }
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (state.inboxOpen) {
+      closeInboxPopup({ restoreFocus: true });
+      return;
+    }
+    openInboxPopup();
+  }
+
+  function openInboxPopup() {
+    state.inboxOpen = true;
+    state.inboxLoading = true;
+    state.inboxError = '';
+    state.inboxEntries = [];
+    renderInboxPopup();
+    positionInboxPopup();
+    loadInboxMarkdownFiles();
+  }
+
+  function closeInboxPopup(options) {
+    if (!state.inboxOpen && (!els.inboxPopover || els.inboxPopover.hidden)) return;
+    const opts = options || {};
+    state.inboxOpen = false;
+    renderInboxPopup();
+    if (opts.restoreFocus && els.inboxBtn) {
+      try { els.inboxBtn.focus(); } catch {}
+    }
+  }
+
+  function onInboxDocumentMouseDown(event) {
+    if (!state.inboxOpen) return;
+    const target = event.target;
+    if (els.inboxPopover && els.inboxPopover.contains(target)) return;
+    if (els.inboxBtn && els.inboxBtn.contains(target)) return;
+    closeInboxPopup({ restoreFocus: false });
+  }
+
+  async function loadInboxMarkdownFiles() {
+    const seq = state.inboxLoadSeq + 1;
+    state.inboxLoadSeq = seq;
+    try {
+      if (!api.listInboxMarkdownFiles) {
+        throw new Error('Inbox file API is unavailable.');
+      }
+      const listing = await api.listInboxMarkdownFiles();
+      if (seq !== state.inboxLoadSeq) return;
+      state.inboxPath = String((listing && listing.path) || '');
+      state.inboxEntries = Array.isArray(listing && listing.entries)
+        ? listing.entries.filter((entry) => entry && typeof entry.path === 'string')
+        : [];
+      state.inboxError = '';
+    } catch (error) {
+      if (seq !== state.inboxLoadSeq) return;
+      state.inboxEntries = [];
+      state.inboxError = (error && error.message) || String(error);
+      logRendererEvent('renderer.inbox.list_failed', { message: state.inboxError }, 'error');
+    } finally {
+      if (seq !== state.inboxLoadSeq) return;
+      state.inboxLoading = false;
+      renderInboxPopup();
+      positionInboxPopup();
+      focusInboxDefault();
+    }
+  }
+
+  function renderInboxPopup() {
+    if (els.inboxBtn) {
+      els.inboxBtn.setAttribute('aria-expanded', state.inboxOpen ? 'true' : 'false');
+      els.inboxBtn.classList.toggle('is-open', state.inboxOpen);
+    }
+    if (!els.inboxPopover) return;
+    els.inboxPopover.hidden = !state.inboxOpen;
+    if (!state.inboxOpen) return;
+
+    if (els.inboxSubtitle) {
+      els.inboxSubtitle.textContent = state.inboxPath || 'Loading inbox...';
+      els.inboxSubtitle.title = state.inboxPath || '';
+    }
+    if (els.inboxCount) {
+      if (state.inboxLoading) {
+        els.inboxCount.textContent = 'Loading';
+      } else if (state.inboxError) {
+        els.inboxCount.textContent = 'Unavailable';
+      } else {
+        const count = state.inboxEntries.length;
+        els.inboxCount.textContent = `${count} md file${count === 1 ? '' : 's'}`;
+      }
+    }
+    if (!els.inboxBody) return;
+    els.inboxBody.innerHTML = '';
+
+    if (state.inboxLoading) {
+      const message = document.createElement('div');
+      message.className = 'inbox-empty';
+      message.textContent = 'Reading markdown files...';
+      els.inboxBody.appendChild(message);
+      return;
+    }
+
+    if (state.inboxError) {
+      const message = document.createElement('div');
+      message.className = 'inbox-empty inbox-error';
+      message.textContent = state.inboxError;
+      els.inboxBody.appendChild(message);
+      return;
+    }
+
+    if (state.inboxEntries.length === 0) {
+      const message = document.createElement('div');
+      message.className = 'inbox-empty';
+      message.textContent = 'No markdown files in inbox.';
+      els.inboxBody.appendChild(message);
+      return;
+    }
+
+    const list = document.createElement('div');
+    list.className = 'inbox-list';
+    for (const entry of state.inboxEntries) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'inbox-file-button';
+      button.title = entry.path;
+      const name = document.createElement('span');
+      name.className = 'inbox-file-name';
+      name.textContent = getInboxFileDisplayName(entry);
+      button.appendChild(name);
+      button.addEventListener('pointerdown', (event) => onInboxFilePointerDown(event, entry, button));
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      button.addEventListener('dragstart', (event) => event.preventDefault());
+      list.appendChild(button);
+    }
+    els.inboxBody.appendChild(list);
+  }
+
+  function positionInboxPopup() {
+    if (!state.inboxOpen || !els.inboxPopover || !els.inboxBtn || els.inboxPopover.hidden) return;
+    const rect = els.inboxBtn.getBoundingClientRect();
+    const popoverWidth = els.inboxPopover.offsetWidth || Math.min(430, window.innerWidth - 24);
+    const popoverHeight = els.inboxPopover.offsetHeight || 360;
+    const left = Math.min(
+      Math.max(12, rect.left + rect.width / 2 - popoverWidth / 2),
+      Math.max(12, window.innerWidth - popoverWidth - 12)
+    );
+    const below = rect.bottom + 10;
+    const top = Math.min(below, Math.max(12, window.innerHeight - popoverHeight - 12));
+    els.inboxPopover.style.left = `${left}px`;
+    els.inboxPopover.style.top = `${top}px`;
+  }
+
+  function focusInboxDefault() {
+    if (!state.inboxOpen || !els.inboxPopover) return;
+    setTimeout(() => {
+      if (!state.inboxOpen || !els.inboxPopover) return;
+      const target = els.inboxPopover.querySelector('.inbox-file-button') || els.inboxClose;
+      if (target) {
+        try { target.focus(); } catch {}
+      }
+    }, 0);
+  }
+
+  function getInboxFileDisplayName(entry) {
+    const explicit = String((entry && entry.displayName) || '').trim();
+    if (explicit) return explicit.replace(/\.md$/i, '');
+    const name = String((entry && entry.name) || basename((entry && entry.path) || ''));
+    return name.replace(/\.md$/i, '');
+  }
+
+  function showInboxToast(text, kind) {
+    let toast = document.getElementById('inbox-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'inbox-toast';
+      toast.className = 'inbox-toast';
+      toast.setAttribute('role', 'status');
+      toast.setAttribute('aria-live', 'polite');
+      document.body.appendChild(toast);
+    }
+    toast.className = `inbox-toast is-${kind || 'info'}`;
+    toast.textContent = text;
+    toast.hidden = false;
+    if (state.inboxToastTimer) clearTimeout(state.inboxToastTimer);
+    state.inboxToastTimer = setTimeout(() => {
+      toast.hidden = true;
+      state.inboxToastTimer = null;
+    }, 2200);
+  }
+
+  function onActivateButtonClick(event) {
+    if (event.detail !== 1) return;
+    if (state.activateClickTimer) clearTimeout(state.activateClickTimer);
+    state.activateClickTimer = setTimeout(() => {
+      state.activateClickTimer = null;
+      dispatchActivatePath().catch((error) => {
+        logRendererEvent('renderer.activate.dispatch_failed', {
+          message: (error && error.message) || String(error),
+        }, 'error');
+      });
+    }, 240);
+  }
+
+  function onActivateButtonDoubleClick(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (state.activateClickTimer) {
+      clearTimeout(state.activateClickTimer);
+      state.activateClickTimer = null;
+    }
+    openActivateFile();
+  }
+
+  async function getActivateFilePath() {
+    if (state.activateFilePath) return state.activateFilePath;
+    if (!api.getActivateFilePath) throw new Error('Activate file path API is unavailable.');
+    state.activateFilePath = await api.getActivateFilePath();
+    return state.activateFilePath;
+  }
+
+  async function dispatchActivatePath() {
+    let filePath = '';
+    try {
+      filePath = await getActivateFilePath();
+    } catch (error) {
+      logRendererEvent('renderer.activate.path_failed', {
+        message: (error && error.message) || String(error),
+      }, 'error');
+      return;
+    }
+
+    const tab = getCurrentInputTab();
+    if (tab && api.writeTerminal) {
+      markCurrentTab(tab);
+      api.writeTerminal(tab.id, filePath);
+      if (isTabVisible(tab)) {
+        try { tab.term.focus(); } catch {}
+      }
+      logRendererEvent('renderer.activate.path_sent_to_terminal', {
+        sessionId: tab.id,
+        agent: tab.agent,
+        cwd: tab.sessionWindow && tab.sessionWindow.folderPath,
+      });
+      return;
+    }
+
+    if (api.writeClipboard) {
+      await api.writeClipboard(filePath);
+      logRendererEvent('renderer.activate.path_copied_to_clipboard', { filePath });
+    }
+  }
+
+  async function openActivateFile() {
+    if (!api.openActivateFile) return;
+    try {
+      const result = await api.openActivateFile();
+      if (!result || !result.success) {
+        throw new Error((result && result.error) || 'Could not open activate file.');
+      }
+      if (result.path) state.activateFilePath = result.path;
+      logRendererEvent('renderer.activate.file_opened', { filePath: result.path || state.activateFilePath });
+    } catch (error) {
+      logRendererEvent('renderer.activate.open_failed', {
+        message: (error && error.message) || String(error),
+      }, 'error');
+    }
+  }
+
   async function launchClaudeForPath(folderPath, sourceCard) {
     const existing = state.windowsByPath.get(folderPath);
     if (existing) {
+      markCurrentTab(getActiveTab(existing));
       restoreSessionWindow(existing, sourceCard || findCard(folderPath));
       return;
     }
@@ -787,6 +1349,41 @@
 
   function isTabLive(tab) {
     return !!tab && tab.ptyAlive === true && tab.exited !== true && tab.failed !== true;
+  }
+
+  function isTabReadyForInput(tab) {
+    return isTabLive(tab) && tab.ptyCreated === true;
+  }
+
+  function markCurrentTab(tab) {
+    if (!tab || !tab.id || !state.tabsById.has(tab.id)) return;
+    state.lastActiveTabId = tab.id;
+  }
+
+  function getCurrentInputTab() {
+    const preferred = state.tabsById.get(state.lastActiveTabId);
+    if (isTabReadyForInput(preferred)) return preferred;
+
+    const activeVisibleTabs = [];
+    const activeTabs = [];
+    const liveTabs = [];
+    const sessionWindows = Array.from(state.windowsByPath.values()).reverse();
+
+    for (const sessionWindow of sessionWindows) {
+      const activeTab = getActiveTab(sessionWindow);
+      if (isTabReadyForInput(activeTab)) {
+        if (!sessionWindow.minimized && !sessionWindow.windowEl.hidden) {
+          activeVisibleTabs.push(activeTab);
+        }
+        activeTabs.push(activeTab);
+      }
+      for (const tab of sessionWindow.tabs) {
+        if (tab === activeTab) continue;
+        if (isTabReadyForInput(tab)) liveTabs.push(tab);
+      }
+    }
+
+    return activeVisibleTabs[0] || activeTabs[0] || liveTabs[0] || null;
   }
 
   function hasLiveTabs(sessionWindow) {
@@ -1253,6 +1850,7 @@
     sessionWindow.tabs.push(firstTab);
     sessionWindow.activeTabId = firstTab.id;
     state.tabsById.set(firstTab.id, firstTab);
+    markCurrentTab(firstTab);
     attachTabChip(sessionWindow, firstTab, { active: true });
 
     windowEl.querySelector('.minimize').addEventListener('click', () => minimizeSessionWindow(sessionWindow, findCard(folderPath)));
@@ -1420,6 +2018,8 @@
       closeBtnEl: null,
     };
 
+    terminalEl.addEventListener('focusin', () => markCurrentTab(tab));
+    terminalEl.addEventListener('mousedown', () => markCurrentTab(tab), true);
     attachTerminalViewportTracking(tab);
 
     return tab;
@@ -1431,6 +2031,7 @@
     if (!target) return null;
     const opts = options || {};
     const previous = getActiveTab(sessionWindow);
+    markCurrentTab(target);
 
     if (sessionWindow.activeTabId === tabId) {
       if (!opts.skipVisibleRepair && (target.needsViewportRefresh || target.scrollToBottomOnReveal)) {
@@ -1656,6 +2257,7 @@
     animateOpen(sessionWindow, sourceCard || findCard(sessionWindow.folderPath));
     renderGrid();
     const tab = getActiveTab(sessionWindow);
+    markCurrentTab(tab);
     if (tab) {
       const scrollToBottom = shouldScrollToBottomOnLayout(tab, { scrollToBottom: tab.scrollToBottomOnReveal });
       scheduleTerminalBecameVisible(tab, {
@@ -2031,6 +2633,7 @@
     tab.ptyCreated = true;
     tab.lastPtyCols = tab.term.cols;
     tab.lastPtyRows = tab.term.rows;
+    markCurrentTab(tab);
   }
 
   function syncPtySize(tab) {

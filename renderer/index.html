@@ -41,6 +41,8 @@
         <section class="content" data-panel-id="content">
           <div class="command-bar" data-panel-id="command-bar">
             <button id="new-session-btn" class="command-button" data-panel-id="new-session-btn">Launch Claude Here</button>
+            <button id="inbox-btn" class="command-button inbox-button" type="button" aria-haspopup="dialog" aria-expanded="false" data-panel-id="inbox-btn">inbox</button>
+            <button id="activate-btn" class="command-button activate-button" type="button" data-panel-id="activate-btn">ACTIVATE</button>
             <div id="folder-count" class="folder-count" data-panel-id="folder-count"></div>
           </div>
           <div id="grid" class="folder-grid" data-panel-id="folder-grid"></div>
@@ -72,6 +74,21 @@
 
     <div id="context-menu" class="context-menu" hidden></div>
     <div id="session-layer" class="session-layer"></div>
+    <div id="inbox-popover" class="inbox-popover" role="dialog" aria-labelledby="inbox-title" hidden>
+      <div class="inbox-glass">
+        <div class="inbox-header">
+          <div class="inbox-heading">
+            <div id="inbox-title" class="inbox-title">Inbox</div>
+            <div id="inbox-subtitle" class="inbox-subtitle"></div>
+          </div>
+          <button id="inbox-close" class="inbox-close" type="button" title="Close inbox" aria-label="Close inbox">X</button>
+        </div>
+        <div class="inbox-meta">
+          <span id="inbox-count" class="inbox-count"></span>
+        </div>
+        <div id="inbox-body" class="inbox-body"></div>
+      </div>
+    </div>
 
     <script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
     <script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>

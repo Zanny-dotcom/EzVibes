@@ -123,6 +123,9 @@ contextBridge.exposeInMainWorld('ezvibes', {
   getLiveLog: () => ipcRenderer.invoke('app:live-log'),
   logEvent: (event, details, level = 'info') => ipcRenderer.send('app:log', { event, details, level }),
   confirmAppClose: (requestId, confirmed) => ipcRenderer.invoke('app:confirm-close', { requestId, confirmed }),
+  getActivateFilePath: () => ipcRenderer.invoke('activate:file-path'),
+  openActivateFile: () => ipcRenderer.invoke('activate:open-file'),
+  listInboxMarkdownFiles: () => ipcRenderer.invoke('inbox:list-markdown'),
   onAppCloseRequested: (callback) => {
     const listener = (_, payload) => callback(payload);
     ipcRenderer.on('app:close-requested', listener);
