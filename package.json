@@ -5,7 +5,7 @@
   "description": "Explorer-style launcher for folder-scoped Claude / Codex terminal sessions.",
   "main": "main.js",
   "scripts": {
-    "check:syntax": "node --check main.js && node --check preload.js && node --check renderer/app.js && node --check scripts/postinstall.js",
+    "check:syntax": "node --check main.js && node --check preload.js && node --check renderer/app.js && node --check renderer/panel-mode.js && node --check scripts/postinstall.js",
     "electron:install": "install-electron --no",
     "start": "electron .",
     "postinstall": "node scripts/postinstall.js",

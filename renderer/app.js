@@ -36,6 +36,16 @@
     inboxHoldSourceEl: null,
     suppressNextInboxClick: false,
     suppressNextInboxClickTimer: null,
+    draftFolderActive: false,
+    draftFolderValue: '',
+    draftFolderError: '',
+    draftFolderNeedsFocus: false,
+    draftFolderCommitting: false,
+    renameTargetPath: '',
+    renameValue: '',
+    renameError: '',
+    renameNeedsFocus: false,
+    renameCommitting: false,
   };
 
   const els = {};
@@ -53,6 +63,7 @@
     els.contextMenu = document.getElementById('context-menu');
     els.sessionLayer = document.getElementById('session-layer');
     els.newSessionBtn = document.getElementById('new-session-btn');
+    els.newFolderBtn = document.getElementById('new-folder-btn');
     els.inboxBtn = document.getElementById('inbox-btn');
     els.inboxPopover = document.getElementById('inbox-popover');
     els.inboxClose = document.getElementById('inbox-close');
@@ -98,6 +109,9 @@
       renderGrid();
     });
     els.newSessionBtn.addEventListener('click', () => launchClaudeForPath(state.currentPath, null));
+    if (els.newFolderBtn) {
+      els.newFolderBtn.addEventListener('click', createFolderInCurrentDirectory);
+    }
     if (els.inboxBtn) {
       els.inboxBtn.addEventListener('click', onInboxButtonClick);
       els.inboxBtn.addEventListener('pointerdown', onInboxButtonPointerDown);
@@ -114,6 +128,7 @@
     els.activeSessionsBtn.addEventListener('click', () => {
       state.viewMode = 'active-sessions';
       state.previewPath = '';
+      clearDraftFolder();
       els.searchInput.value = '';
       state.query = '';
       renderSidebarState();
@@ -155,6 +170,15 @@
         cancelInboxButtonHold();
         closeInboxPopup({ restoreFocus: false });
       }
+    });
+    window.addEventListener('keydown', (event) => {
+      if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) return;
+      if ((event.key || '').toLowerCase() !== 'n') return;
+      const target = event.target;
+      if (target && target.closest && target.closest('.terminal-host')) return;
+      event.preventDefault();
+      event.stopPropagation();
+      createFolderInCurrentDirectory();
     });
     window.addEventListener('keydown', (event) => {
       const target = event.target;
@@ -238,7 +262,7 @@
           const text = await api.readClipboard();
           if (text) {
             const tab = findTabForElement(target);
-            if (tab) api.writeTerminal(tab.id, text);
+            if (tab) pasteIntoTerminal(tab, text);
           }
           return;
         }
@@ -567,6 +591,7 @@
     state.parentPath = listing.parent;
     state.entries = listing.entries;
     state.previewPath = '';
+    clearDraftFolder();
     els.searchInput.value = '';
     state.query = '';
     state.viewMode = 'all';
@@ -574,6 +599,67 @@
     renderPath();
     renderGrid();
     renderNarrationSidebar();
+  }
+
+  async function refreshCurrentDirectory() {
+    if (!state.currentPath) return;
+    const listing = await api.listDirectory(state.currentPath);
+    state.currentPath = listing.path;
+    state.parentPath = listing.parent;
+    state.entries = listing.entries;
+    renderSidebarState();
+    renderPath();
+    renderGrid();
+    renderNarrationSidebar();
+  }
+
+  async function createFolderInCurrentDirectory() {
+    if (!state.currentPath || !api.createFolder) return;
+    if (els.newFolderBtn && els.newFolderBtn.disabled) return;
+    if (state.draftFolderActive) {
+      focusDraftFolderInput();
+      return;
+    }
+    state.viewMode = 'all';
+    state.previewPath = '';
+    state.query = '';
+    if (els.searchInput) els.searchInput.value = '';
+    state.draftFolderActive = true;
+    state.draftFolderValue = '';
+    state.draftFolderError = '';
+    state.draftFolderNeedsFocus = true;
+    state.draftFolderCommitting = false;
+    renderSidebarState();
+    renderGrid();
+  }
+
+  async function deleteFolderWithConfirm(entry, sourceCard) {
+    if (!entry || !api.deleteFolder) return;
+    if (state.windowsByPath.get(entry.path)) {
+      showInboxToast('Close the session for this folder before deleting it.', 'error');
+      return;
+    }
+    const confirmed = await confirmDestructiveClose({
+      title: `Delete "${entry.name}"?`,
+      body: 'Moves the folder to the Recycle Bin. You can restore it from there.',
+      confirmLabel: 'Delete',
+      cancelLabel: 'Cancel',
+      danger: true,
+      returnFocusTo: sourceCard || null,
+    });
+    if (!confirmed) return;
+    try {
+      const result = await api.deleteFolder({ path: entry.path });
+      if (!result || !result.success) {
+        throw new Error((result && result.error) || 'Could not delete folder.');
+      }
+      if (state.previewPath === entry.path) state.previewPath = '';
+      await refreshCurrentDirectory();
+      addNarrationEvent(state.currentPath, 'folder-deleted', `Sent "${result.name}" to Recycle Bin.`);
+      if (api.logEvent) api.logEvent('renderer.folder.deleted', { folderPath: result.path, name: result.name });
+    } catch (error) {
+      showInboxToast('Could not delete: ' + ((error && error.message) || String(error)), 'error');
+    }
   }
 
   function goBack() {
@@ -629,6 +715,303 @@
     return `${count} item${count === 1 ? '' : 's'}`;
   }
 
+  function clearDraftFolder() {
+    state.draftFolderActive = false;
+    state.draftFolderValue = '';
+    state.draftFolderError = '';
+    state.draftFolderNeedsFocus = false;
+    state.draftFolderCommitting = false;
+  }
+
+  function cancelDraftFolder() {
+    clearDraftFolder();
+    renderGrid();
+  }
+
+  function focusDraftFolderInput() {
+    const input = els.grid && els.grid.querySelector('.folder-draft-input');
+    if (!input) return false;
+    try {
+      input.focus();
+      input.select();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function setDraftFolderError(input, message) {
+    state.draftFolderError = message || '';
+    if (!input) return;
+    if (message) input.disabled = false;
+    input.classList.toggle('is-error', !!message);
+    const errorEl = input.parentElement && input.parentElement.querySelector('.folder-rename-error');
+    if (errorEl) {
+      errorEl.textContent = message || '';
+      errorEl.hidden = !message;
+    }
+    if (message) {
+      requestAnimationFrame(() => {
+        input.focus();
+        input.select();
+      });
+    }
+  }
+
+  async function commitDraftFolder(input, options) {
+    if (!input || state.draftFolderCommitting) return;
+    const opts = options || {};
+    const requestedName = input.value.trim();
+    state.draftFolderValue = requestedName;
+
+    if (!requestedName) {
+      if (opts.cancelIfEmpty) {
+        cancelDraftFolder();
+      } else {
+        setDraftFolderError(input, 'Type a folder name.');
+      }
+      return;
+    }
+
+    state.draftFolderCommitting = true;
+    if (els.newFolderBtn) els.newFolderBtn.disabled = true;
+    input.disabled = true;
+    setDraftFolderError(input, '');
+    const parentPath = state.currentPath;
+
+    try {
+      const result = await api.createFolder({ parentPath, name: requestedName });
+      if (!result || !result.success) {
+        throw new Error((result && result.error) || 'Could not create folder.');
+      }
+      clearDraftFolder();
+      if (els.newFolderBtn) els.newFolderBtn.disabled = false;
+      if (state.currentPath === parentPath) {
+        state.previewPath = result.path;
+        await refreshCurrentDirectory();
+        const card = findCard(result.path);
+        if (card) {
+          card.classList.add('preview-selected');
+          card.focus();
+        }
+      }
+      addNarrationEvent(parentPath, 'folder-created', `Created folder ${result.name}.`);
+      if (api.logEvent) api.logEvent('renderer.folder.created', { parentPath, folderPath: result.path });
+    } catch (error) {
+      state.draftFolderCommitting = false;
+      if (els.newFolderBtn) els.newFolderBtn.disabled = false;
+      setDraftFolderError(input, (error && error.message) || String(error));
+    }
+  }
+
+  function attachDraftFolderInput(input) {
+    input.addEventListener('mousedown', (event) => event.stopPropagation());
+    input.addEventListener('click', (event) => event.stopPropagation());
+    input.addEventListener('input', () => {
+      state.draftFolderValue = input.value;
+      if (state.draftFolderError) setDraftFolderError(input, '');
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        event.stopPropagation();
+        commitDraftFolder(input);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        input.dataset.cancelled = 'true';
+        cancelDraftFolder();
+      }
+    });
+    input.addEventListener('blur', () => {
+      if (input.dataset.cancelled === 'true') return;
+      commitDraftFolder(input, { cancelIfEmpty: true });
+    });
+    if (state.draftFolderNeedsFocus) {
+      state.draftFolderNeedsFocus = false;
+      requestAnimationFrame(() => {
+        input.focus();
+        input.select();
+      });
+    }
+  }
+
+  function appendDraftFolderCard() {
+    const card = document.createElement('div');
+    card.className = 'folder-card is-folder is-renaming is-draft';
+    card.setAttribute('data-panel-id', 'folder-card');
+    card.title = 'New folder draft';
+
+    const icon = document.createElement('span');
+    icon.className = 'folder-icon';
+
+    const input = document.createElement('input');
+    input.className = 'folder-name folder-rename-input folder-draft-input';
+    input.type = 'text';
+    input.value = state.draftFolderValue;
+    input.placeholder = 'Folder name';
+    input.maxLength = 120;
+    input.setAttribute('aria-label', 'Folder name');
+    input.setAttribute('aria-describedby', 'folder-draft-error');
+
+    const errorEl = document.createElement('span');
+    errorEl.className = 'folder-rename-error';
+    errorEl.id = 'folder-draft-error';
+    errorEl.setAttribute('role', 'alert');
+    errorEl.textContent = state.draftFolderError;
+    errorEl.hidden = !state.draftFolderError;
+    if (state.draftFolderError) input.classList.add('is-error');
+
+    attachDraftFolderInput(input);
+    card.append(icon, input, errorEl);
+    els.grid.appendChild(card);
+  }
+
+  function clearRename() {
+    state.renameTargetPath = '';
+    state.renameValue = '';
+    state.renameError = '';
+    state.renameNeedsFocus = false;
+    state.renameCommitting = false;
+  }
+
+  function cancelRename() {
+    clearRename();
+    renderGrid();
+  }
+
+  function focusRenameInput() {
+    const input = els.grid && els.grid.querySelector('.folder-rename-edit-input');
+    if (!input) return false;
+    try {
+      input.focus();
+      input.select();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function setRenameError(input, message) {
+    state.renameError = message || '';
+    if (!input) return;
+    if (message) input.disabled = false;
+    input.classList.toggle('is-error', !!message);
+    const errorEl = input.parentElement && input.parentElement.querySelector('.folder-rename-error');
+    if (errorEl) {
+      errorEl.textContent = message || '';
+      errorEl.hidden = !message;
+    }
+    if (message) {
+      requestAnimationFrame(() => {
+        input.focus();
+        input.select();
+      });
+    }
+  }
+
+  async function commitRename(input, options) {
+    if (!input || state.renameCommitting) return;
+    const opts = options || {};
+    const targetPath = state.renameTargetPath;
+    if (!targetPath) {
+      cancelRename();
+      return;
+    }
+    const requestedName = input.value.trim();
+    state.renameValue = requestedName;
+    const originalName = basename(targetPath);
+
+    if (!requestedName) {
+      if (opts.cancelIfEmpty) {
+        cancelRename();
+      } else {
+        setRenameError(input, 'Type a folder name.');
+      }
+      return;
+    }
+
+    if (requestedName === originalName) {
+      cancelRename();
+      return;
+    }
+
+    state.renameCommitting = true;
+    input.disabled = true;
+    setRenameError(input, '');
+
+    try {
+      const result = await api.renameFolder({ path: targetPath, newName: requestedName });
+      if (!result || !result.success) {
+        throw new Error((result && result.error) || 'Could not rename folder.');
+      }
+      clearRename();
+      state.previewPath = result.path;
+      await refreshCurrentDirectory();
+      const card = findCard(result.path);
+      if (card) {
+        card.classList.add('preview-selected');
+        card.focus();
+      }
+      addNarrationEvent(state.currentPath, 'folder-renamed', `Renamed folder to ${result.name}.`);
+      if (api.logEvent) api.logEvent('renderer.folder.renamed', { folderPath: result.path, name: result.name });
+    } catch (error) {
+      state.renameCommitting = false;
+      setRenameError(input, (error && error.message) || String(error));
+    }
+  }
+
+  function attachRenameInput(input) {
+    input.addEventListener('mousedown', (event) => event.stopPropagation());
+    input.addEventListener('click', (event) => event.stopPropagation());
+    input.addEventListener('input', () => {
+      state.renameValue = input.value;
+      if (state.renameError) setRenameError(input, '');
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        event.stopPropagation();
+        commitRename(input);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        input.dataset.cancelled = 'true';
+        cancelRename();
+      }
+    });
+    input.addEventListener('blur', () => {
+      if (input.dataset.cancelled === 'true') return;
+      commitRename(input, { cancelIfEmpty: true });
+    });
+    if (state.renameNeedsFocus) {
+      state.renameNeedsFocus = false;
+      requestAnimationFrame(() => {
+        input.focus();
+        input.select();
+      });
+    }
+  }
+
+  function startRename(entry) {
+    if (!entry || entry.kind !== 'directory') return;
+    if (state.windowsByPath.get(entry.path)) {
+      showInboxToast('Close the session for this folder before renaming it.', 'error');
+      return;
+    }
+    if (state.draftFolderActive) cancelDraftFolder();
+    if (state.renameTargetPath === entry.path) {
+      focusRenameInput();
+      return;
+    }
+    state.renameTargetPath = entry.path;
+    state.renameValue = entry.name;
+    state.renameError = '';
+    state.renameNeedsFocus = true;
+    state.renameCommitting = false;
+    renderGrid();
+  }
+
   function renderGrid() {
     const entries = getVisibleEntries();
     els.grid.innerHTML = '';
@@ -644,9 +1027,16 @@
       return;
     }
 
+    if (state.draftFolderActive && state.viewMode !== 'active-sessions') {
+      appendDraftFolderCard();
+    }
+
     for (const entry of entries) {
-      const card = document.createElement('button');
+      const isRenaming = entry.kind === 'directory' && entry.path === state.renameTargetPath;
+      const card = document.createElement(isRenaming ? 'div' : 'button');
+      if (!isRenaming) card.type = 'button';
       card.className = `folder-card ${entry.kind === 'directory' ? 'is-folder' : 'is-file'}`;
+      if (isRenaming) card.classList.add('is-renaming');
       card.setAttribute('data-panel-id', 'folder-card');
       card.dataset.path = entry.path;
       card.title = entry.path;
@@ -666,6 +1056,29 @@
       const icon = document.createElement('span');
       icon.className = 'folder-icon';
       if (entry.kind === 'file') icon.classList.add('file-icon');
+
+      if (isRenaming) {
+        const input = document.createElement('input');
+        input.className = 'folder-name folder-rename-input folder-rename-edit-input';
+        input.type = 'text';
+        input.value = state.renameValue;
+        input.maxLength = 120;
+        input.setAttribute('aria-label', 'Folder name');
+        input.setAttribute('aria-describedby', 'folder-rename-edit-error');
+
+        const errorEl = document.createElement('span');
+        errorEl.className = 'folder-rename-error';
+        errorEl.id = 'folder-rename-edit-error';
+        errorEl.setAttribute('role', 'alert');
+        errorEl.textContent = state.renameError;
+        errorEl.hidden = !state.renameError;
+        if (state.renameError) input.classList.add('is-error');
+
+        attachRenameInput(input);
+        card.append(icon, input, errorEl);
+        els.grid.appendChild(card);
+        continue;
+      }
 
       const name = document.createElement('span');
       name.className = 'folder-name';
@@ -713,6 +1126,19 @@
         });
         addMenuItem('Close Session', () => requestCloseSessionWindow(sessionWindow, { animate: true }));
       }
+      const hasLiveSession = !!sessionWindow;
+      addMenuItem('Rename', () => startRename(entry), {
+        disabled: hasLiveSession,
+        title: hasLiveSession ? 'Close the session first.' : undefined,
+      });
+      const divider = document.createElement('hr');
+      divider.className = 'context-menu-divider';
+      els.contextMenu.appendChild(divider);
+      addMenuItem('Delete', () => deleteFolderWithConfirm(entry, sourceCard), {
+        disabled: hasLiveSession,
+        title: hasLiveSession ? 'Close the session first.' : undefined,
+        variant: 'danger',
+      });
     } else {
       addMenuItem('No folder actions', null, true);
     }
@@ -725,11 +1151,16 @@
     els.contextMenu.style.top = `${Math.max(12, top)}px`;
   }
 
-  function addMenuItem(label, action, disabled) {
+  function addMenuItem(label, action, optionsOrDisabled) {
+    const opts = (optionsOrDisabled && typeof optionsOrDisabled === 'object')
+      ? optionsOrDisabled
+      : { disabled: !!optionsOrDisabled };
     const button = document.createElement('button');
     button.className = 'context-menu-item';
+    if (opts.variant === 'danger') button.classList.add('is-danger');
     button.textContent = label;
-    button.disabled = !!disabled;
+    button.disabled = !!opts.disabled;
+    if (opts.title) button.title = opts.title;
     if (action) {
       button.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -935,8 +1366,21 @@
 
   async function resolveInboxDragPath(payload) {
     const explicit = String((payload && payload.path) || '');
-    if (explicit) return explicit;
-    return getInboxFolderPath();
+    if (!explicit) return getInboxFolderPath();
+    if (payload && payload.kind === 'file' && api.readInboxMarkdown) {
+      try {
+        const result = await api.readInboxMarkdown(explicit);
+        const content = String((result && result.content) || '').trim();
+        const words = content.split(/\s+/).filter(Boolean);
+        if (words.length > 0 && words.length < 50) return content;
+      } catch (error) {
+        logRendererEvent('renderer.inbox.read_failed', {
+          path: explicit,
+          message: (error && error.message) || String(error),
+        }, 'warn');
+      }
+    }
+    return explicit;
   }
 
   async function dropInboxPathOnTab(tab, target, payload) {
@@ -2894,7 +3338,7 @@
     }, !selection);
     addMenuItem('Paste', async () => {
       const text = await api.readClipboard();
-      if (text) api.writeTerminal(tab.id, text);
+      if (text) pasteIntoTerminal(tab, text);
     });
     addMenuItem('Select All', () => {
       tab.term.selectAll();
@@ -3130,6 +3574,20 @@
     const s = String(value || '');
     if (s.length <= max) return s;
     return s.slice(0, max - 1) + '…';
+  }
+
+  function pasteIntoTerminal(tab, text) {
+    if (!tab || typeof text !== 'string' || text.length === 0) return;
+    if (tab.term && typeof tab.term.focus === 'function') tab.term.focus();
+    if (tab.term && typeof tab.term.paste === 'function') {
+      tab.term.paste(text);
+      return;
+    }
+
+    const normalized = text.replace(/\r?\n/g, '\r');
+    const bracketed = tab.term && tab.term.modes && tab.term.modes.bracketedPasteMode === true;
+    const payload = bracketed ? `\x1b[200~${normalized}\x1b[201~` : normalized;
+    api.writeTerminal(tab.id, payload);
   }
 
   function handleTerminalInput(tab, data) {

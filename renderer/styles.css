@@ -197,6 +197,25 @@ button {
   border-color: var(--accent);
 }
 
+.launch-claude-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  padding: 0;
+  color: #d97757;
+}
+
+.launch-claude-btn:hover {
+  color: #e88a6a;
+}
+
+.launch-claude-btn .claude-mark {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
 .inbox-button {
   min-width: 72px;
   padding: 0 16px;
@@ -475,6 +494,16 @@ body.inbox-path-dragging * {
   color: #ffffff;
 }
 
+.new-folder-button {
+  border-color: #5a6b62;
+  background: #1d2622;
+}
+
+.new-folder-button:hover {
+  border-color: #55b6ff;
+  background: rgba(85, 182, 255, 0.12);
+}
+
 .folder-count {
   color: var(--muted);
   font-size: 13px;
@@ -520,6 +549,11 @@ body.inbox-path-dragging * {
 }
 
 .folder-card.preview-selected {
+  border-color: var(--accent);
+  background: rgba(85, 182, 255, 0.08);
+}
+
+.folder-card.is-renaming {
   border-color: var(--accent);
   background: rgba(85, 182, 255, 0.08);
 }
@@ -601,6 +635,40 @@ body.inbox-path-dragging * {
   overflow-wrap: anywhere;
 }
 
+.folder-rename-input {
+  width: 160px;
+  min-height: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 5px;
+  background: #f8faf8;
+  color: #101211;
+  font: inherit;
+  line-height: 16px;
+  outline: none;
+  text-align: center;
+  overflow-wrap: normal;
+}
+
+.folder-rename-input.is-error {
+  border-color: #ff6b6b;
+  box-shadow: 0 0 0 2px rgba(255, 107, 107, 0.2);
+}
+
+.folder-rename-input:disabled {
+  opacity: 0.72;
+}
+
+.folder-rename-error {
+  max-width: 180px;
+  margin-top: -4px;
+  color: #ff8a8a;
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 .context-menu {
   position: fixed;
   z-index: 30;
@@ -628,6 +696,25 @@ body.inbox-path-dragging * {
 }
 
 .context-menu-item:disabled {
+  color: #68716d;
+}
+
+.context-menu-divider {
+  margin: 4px 0;
+  border: 0;
+  height: 1px;
+  background: #3c4542;
+}
+
+.context-menu-item.is-danger {
+  color: #ff8a8a;
+}
+
+.context-menu-item.is-danger:hover:not(:disabled) {
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.context-menu-item.is-danger:disabled {
   color: #68716d;
 }
 

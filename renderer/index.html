@@ -40,9 +40,19 @@
 
         <section class="content" data-panel-id="content">
           <div class="command-bar" data-panel-id="command-bar">
-            <button id="new-session-btn" class="command-button" data-panel-id="new-session-btn">Launch Claude Here</button>
+            <button id="new-session-btn" class="command-button launch-claude-btn" type="button" title="Launch Claude Here" aria-label="Launch Claude Here" data-panel-id="new-session-btn">
+              <svg class="claude-mark" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" fill="currentColor" aria-hidden="true" focusable="false">
+                <ellipse cx="16" cy="16" rx="2" ry="13" />
+                <ellipse cx="16" cy="16" rx="13" ry="2" />
+                <g transform="rotate(45 16 16)">
+                  <ellipse cx="16" cy="16" rx="1.8" ry="8.5" />
+                  <ellipse cx="16" cy="16" rx="8.5" ry="1.8" />
+                </g>
+              </svg>
+            </button>
             <button id="inbox-btn" class="command-button inbox-button" type="button" aria-haspopup="dialog" aria-expanded="false" data-panel-id="inbox-btn">inbox</button>
             <button id="activate-btn" class="command-button activate-button" type="button" data-panel-id="activate-btn">ACTIVATE</button>
+            <button id="new-folder-btn" class="command-button new-folder-button" type="button" data-panel-id="new-folder-btn">New Folder</button>
             <div id="folder-count" class="folder-count" data-panel-id="folder-count"></div>
           </div>
           <div id="grid" class="folder-grid" data-panel-id="folder-grid"></div>

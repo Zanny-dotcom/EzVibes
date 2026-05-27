@@ -101,6 +101,9 @@ contextBridge.exposeInMainWorld('ezvibes', {
   getInitialPath: () => ipcRenderer.invoke('app:initial-path'),
   getQuickPaths: () => ipcRenderer.invoke('app:quick-paths'),
   listDirectory: (folderPath) => ipcRenderer.invoke('fs:list-directory', folderPath),
+  createFolder: (payload) => ipcRenderer.invoke('fs:create-folder', payload),
+  renameFolder: (payload) => ipcRenderer.invoke('fs:rename-folder', payload),
+  deleteFolder: (payload) => ipcRenderer.invoke('fs:delete-folder', payload),
   createTerminal: (payload) => ipcRenderer.invoke('terminal:create', payload),
   writeTerminal: (sessionId, data) => ipcRenderer.send('terminal:input', { sessionId, data }),
   resizeTerminal: (sessionId, cols, rows) => ipcRenderer.send('terminal:resize', { sessionId, cols, rows }),
@@ -126,6 +129,7 @@ contextBridge.exposeInMainWorld('ezvibes', {
   getActivateFilePath: () => ipcRenderer.invoke('activate:file-path'),
   openActivateFile: () => ipcRenderer.invoke('activate:open-file'),
   listInboxMarkdownFiles: () => ipcRenderer.invoke('inbox:list-markdown'),
+  readInboxMarkdown: (filePath) => ipcRenderer.invoke('inbox:read-markdown', filePath),
   onAppCloseRequested: (callback) => {
     const listener = (_, payload) => callback(payload);
     ipcRenderer.on('app:close-requested', listener);

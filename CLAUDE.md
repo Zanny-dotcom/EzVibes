@@ -93,6 +93,9 @@ Main IPC channels:
 - `app:initial-path`
 - `app:quick-paths`
 - `fs:list-directory`
+- `fs:create-folder`
+- `fs:rename-folder`
+- `fs:delete-folder`
 - `terminal:create`
 - `terminal:input`
 - `terminal:resize`
@@ -107,7 +110,7 @@ Main IPC channels:
 - `clipboard:read`
 - `clipboard:write`
 
-Preload API on `window.ezvibes`: `getInitialPath`, `getQuickPaths`, `listDirectory`, `createTerminal`, `writeTerminal`, `resizeTerminal`, `closeTerminal`, `onTerminalData`, `onTerminalExit`, `getLiveLog`, `onLiveLogEntry`, `logEvent`, `onAppCloseRequested`, `confirmAppClose`, `readClipboard`, `writeClipboard`, `getPathForFile`.
+Preload API on `window.ezvibes`: `getInitialPath`, `getQuickPaths`, `listDirectory`, `createFolder`, `renameFolder`, `deleteFolder`, `createTerminal`, `writeTerminal`, `resizeTerminal`, `closeTerminal`, `onTerminalData`, `onTerminalExit`, `getLiveLog`, `onLiveLogEntry`, `logEvent`, `onAppCloseRequested`, `confirmAppClose`, `readClipboard`, `writeClipboard`, `getPathForFile`.
 
 Terminal sessions are stored in `main.js` in a `Map` keyed by renderer-created `sessionId`; each record also stores the owning `webContents` id so other renderers cannot write to or close it. The renderer groups PTYs into session windows (one per folder), each holding one or more tabs. State lives in:
 
@@ -173,7 +176,7 @@ This avoids fitting against 0x0/stale hidden hosts and prevents terminal edge or
 - Sidebar has quick links for Home, Desktop, Documents, Downloads, and EZvibes when present.
 - Search filters visible folder/file entries.
 - Double-clicking a normal folder navigates into it.
-- Right-clicking a folder opens actions (`Launch Claude`, minimize/restore when a session window exists, rename, etc.).
+- Right-clicking a folder opens actions: `Open Folder`, `Launch Claude`, session minimize/restore/close when a session window exists, `Rename` (inline edit on the card), and `Delete` (red, sends the folder to the Windows Recycle Bin). Both `Rename` and `Delete` are disabled with a "Close the session first." tooltip whenever the folder has a live session attached, since both would invalidate a running PTY's cwd.
 - Right-clicking a file has no real actions yet.
 - `Launch Claude Here` launches a Claude session window for the current directory.
 - Session windows show a Chrome-style tab strip at the top. Each tab is an independent PTY running in the window's folder; today the agent is either `claude --dangerously-skip-permissions` or `codex --yolo`.
@@ -195,7 +198,8 @@ This avoids fitting against 0x0/stale hidden hosts and prevents terminal edge or
 - Tabs are in-memory only; closing the app loses tab state (labels, custom names, count).
 - No tab keyboard shortcuts yet (Ctrl+Tab, Ctrl+W, etc.).
 - Tabs cannot be reordered or detached into separate windows.
-- No file operations yet: rename, delete, copy, move, create folder.
+- No file operations yet: copy, move.
+- Folders inside OneDrive may be routed to OneDrive's own trash rather than the Windows Recycle Bin when deleted (Electron `shell.trashItem` behavior). EZvibes treats either outcome as success once the folder disappears from the grid.
 - No watcher yet, so folder contents do not live-refresh.
 - No breadcrumb segments yet, only a path bar.
 - No multi-window support.

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, clipboard, session, webContents } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, clipboard, session, webContents, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -639,6 +639,121 @@ function assertDirectory(inputPath) {
   return resolved;
 }
 
+function isReservedWindowsBasename(name) {
+  const stem = String(name).split('.')[0];
+  return WINDOWS_RESERVED_FILE_BASENAMES.has(stem.toUpperCase());
+}
+
+function assertSafeEntryName(value) {
+  const name = String(value || '').trim();
+  if (!name) throw new Error('Folder name cannot be empty.');
+  if (/[<>:"/\\|?*\x00-\x1f]/.test(name)) {
+    throw new Error('Folder name contains unsupported characters.');
+  }
+  if (name.includes('/') || name.includes('\\')) {
+    throw new Error('Folder name cannot contain path separators.');
+  }
+  if (name === '.' || name === '..' || name.endsWith('.')) {
+    throw new Error('Folder name is reserved.');
+  }
+  if (name.length > 120) {
+    throw new Error('Folder name is too long.');
+  }
+  if (isReservedWindowsBasename(name)) {
+    throw new Error('Folder name is reserved.');
+  }
+  return name;
+}
+
+function createFolder(payload) {
+  const parentDir = assertDirectory(payload && payload.parentPath);
+  const newName = assertSafeEntryName(payload && payload.name);
+  const targetPath = path.resolve(parentDir, newName);
+  if (!isPathInside(parentDir, targetPath) || path.dirname(targetPath) !== parentDir) {
+    throw new Error('Folder name resolves outside the parent folder.');
+  }
+
+  try {
+    fs.mkdirSync(targetPath);
+  } catch (error) {
+    if (error && error.code === 'EEXIST') {
+      throw new Error(`An item named "${newName}" already exists.`);
+    }
+    throw error;
+  }
+  writeLog('info', 'fs.folder_created', { parentDir, folderPath: targetPath, name: newName });
+  return { success: true, path: targetPath, name: newName, parent: parentDir };
+}
+
+function renameFolder(payload) {
+  if (!payload || typeof payload.path !== 'string' || !payload.path.trim()) {
+    throw new Error('Folder path is required.');
+  }
+  const entryPath = path.resolve(payload.path);
+  const parentDir = assertDirectory(path.dirname(entryPath));
+  const stat = fs.statSync(entryPath);
+  if (!stat.isDirectory()) {
+    throw new Error('Only folders can be renamed from EZvibes.');
+  }
+  const newName = assertSafeEntryName(payload && payload.newName);
+  const targetPath = path.resolve(parentDir, newName);
+  if (!isPathInside(parentDir, targetPath) || path.dirname(targetPath) !== parentDir) {
+    throw new Error('Folder name resolves outside the parent folder.');
+  }
+
+  const sameNormalized = normalizePathForCompare(entryPath) === normalizePathForCompare(targetPath);
+  const isCaseOnlyChange = sameNormalized && path.basename(entryPath) !== newName;
+
+  if (!sameNormalized && fs.existsSync(targetPath)) {
+    throw new Error(`An item named "${newName}" already exists.`);
+  }
+
+  if (isCaseOnlyChange) {
+    const tempPath = path.join(parentDir, `.ezvibes-rename-temp-${Date.now()}-${process.pid}`);
+    fs.renameSync(entryPath, tempPath);
+    try {
+      fs.renameSync(tempPath, targetPath);
+    } catch (error) {
+      try { fs.renameSync(tempPath, entryPath); } catch {}
+      throw error;
+    }
+  } else if (!sameNormalized) {
+    fs.renameSync(entryPath, targetPath);
+  }
+
+  writeLog('info', 'fs.folder_renamed', { from: entryPath, to: targetPath, name: newName });
+  return {
+    success: true,
+    path: targetPath,
+    name: newName,
+    parent: parentDir,
+  };
+}
+
+async function deleteFolder(payload) {
+  if (!payload || typeof payload.path !== 'string' || !payload.path.trim()) {
+    throw new Error('Folder path is required.');
+  }
+  const target = path.resolve(payload.path);
+  const stat = fs.statSync(target);
+  if (!stat.isDirectory()) {
+    throw new Error('Only folders can be deleted from EZvibes.');
+  }
+  await shell.trashItem(target);
+  const result = {
+    success: true,
+    path: target,
+    parent: path.dirname(target),
+    name: path.basename(target),
+  };
+  writeLog('info', 'fs.folder_trashed', {
+    path: result.path,
+    parent: result.parent,
+    name: result.name,
+  });
+  return result;
+}
+
 function listDirectory(inputPath) {
   const dir = assertDirectory(inputPath);
   const names = fs.readdirSync(dir, { withFileTypes: true });
@@ -687,6 +802,22 @@ function listInboxMarkdownFiles() {
     });
   entries.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   return { path: INBOX_DIR_PATH, entries };
+}
+
+function readInboxMarkdownFile(filePath) {
+  fs.mkdirSync(INBOX_DIR_PATH, { recursive: true });
+  const requested = path.resolve(String(filePath || ''));
+  const inboxResolved = path.resolve(INBOX_DIR_PATH);
+  const isInside = requested === inboxResolved
+    || requested.startsWith(inboxResolved + path.sep);
+  if (!isInside) {
+    throw new Error('Path is outside the inbox directory.');
+  }
+  if (path.extname(requested).toLowerCase() !== '.md') {
+    throw new Error('Not a markdown file.');
+  }
+  const content = fs.readFileSync(requested, 'utf8');
+  return { content };
 }
 
 function quickPaths() {
@@ -864,7 +995,32 @@ function registerIpcHandlers() {
     }
   });
   ipcMain.handle('inbox:list-markdown', () => listInboxMarkdownFiles());
+  ipcMain.handle('inbox:read-markdown', (_event, filePath) => readInboxMarkdownFile(filePath));
   ipcMain.handle('fs:list-directory', (_, folderPath) => listDirectory(folderPath));
+  ipcMain.handle('fs:create-folder', (_event, payload) => {
+    try {
+      return createFolder(payload);
+    } catch (error) {
+      writeLog('error', 'fs.folder_create_failed', { error });
+      return { success: false, error: (error && error.message) || String(error) };
+    }
+  });
+  ipcMain.handle('fs:rename-folder', (_event, payload) => {
+    try {
+      return renameFolder(payload);
+    } catch (error) {
+      writeLog('error', 'fs.folder_rename_failed', { error, path: payload && payload.path });
+      return { success: false, error: (error && error.message) || String(error) };
+    }
+  });
+  ipcMain.handle('fs:delete-folder', async (_event, payload) => {
+    try {
+      return await deleteFolder(payload);
+    } catch (error) {
+      writeLog('error', 'fs.folder_trash_failed', { error, path: payload && payload.path });
+      return { success: false, error: (error && error.message) || String(error) };
+    }
+  });
 
   ipcMain.handle('terminal:create', (event, payload) => {
     const sessionId = payload && String(payload.sessionId || '');
