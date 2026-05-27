@@ -1,4 +1,6 @@
 (function () {
+  const EZVIBES_FOLDER = 'C:\\Users\\Oskari\\Documents\\EZvibes';
+
   const PANEL_REGIONS = new Map([
     // Static regions (tagged in renderer/index.html)
     ['topbar', { name: 'Top bar', file: 'renderer/index.html', line: '16-29', describe: 'Header strip: brand label, nav buttons, path bar, search input, narration / panel-mode / log toggles.' }],
@@ -109,6 +111,13 @@
     composerCancelBtn = composerEl.querySelector('[data-action="cancel"]');
     composerSendBtn = composerEl.querySelector('[data-action="send"]');
     composerCancelBtn.addEventListener('click', closeComposer);
+    composerSendBtn.addEventListener('click', onSend);
+    composerTextarea.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        onSend();
+      }
+    });
     return composerEl;
   }
 
@@ -152,6 +161,80 @@
     composerEl.hidden = true;
     frozenRegion = null;
     paintHighlight(null);
+  }
+
+  function buildPayload(region, message) {
+    return [
+      '[EZvibes panel-mode request]',
+      `Target: ${region.meta.name}`,
+      `Selector: [data-panel-id="${region.id}"]`,
+      `Defined: ${region.meta.file}:${region.meta.line}`,
+      `Description: ${region.meta.describe}`,
+      '',
+      'Request:',
+      message.trim(),
+    ].join('\n');
+  }
+
+  function showToast(text) {
+    if (!composerToast) return;
+    composerToast.textContent = text;
+    composerToast.hidden = false;
+    setTimeout(() => {
+      if (composerToast) composerToast.hidden = true;
+    }, 2500);
+  }
+
+  async function dispatchPayload(region, message) {
+    const api = window.ezvibes;
+    const internals = window.ezvibesInternals;
+    const payload = buildPayload(region, message);
+
+    const sessionWindow = internals && internals.getSessionWindowByPath
+      ? internals.getSessionWindowByPath(EZVIBES_FOLDER)
+      : null;
+    const activeTab = sessionWindow && internals.getActiveTab
+      ? internals.getActiveTab(sessionWindow)
+      : null;
+
+    if (activeTab && activeTab.ptyAlive && api && api.writeTerminal) {
+      const wrapped = `\x1b[200~${payload}\x1b[201~\n`;
+      api.writeTerminal(activeTab.id, wrapped);
+      return { delivered: 'tab' };
+    }
+
+    if (api && api.writeClipboard) {
+      await api.writeClipboard(payload);
+      return { delivered: 'clipboard' };
+    }
+
+    return { delivered: 'none' };
+  }
+
+  async function onSend() {
+    if (!frozenRegion) return;
+    const message = composerTextarea.value.trim();
+    if (!message) {
+      composerTextarea.focus();
+      return;
+    }
+    const region = frozenRegion;
+    composerSendBtn.disabled = true;
+    try {
+      const result = await dispatchPayload(region, message);
+      composerSendBtn.disabled = false;
+      if (result.delivered === 'tab') {
+        closeComposer();
+        setActive(false);
+      } else if (result.delivered === 'clipboard') {
+        showToast('No active EZvibes terminal session — payload copied to clipboard.');
+      } else {
+        showToast('Could not deliver payload (no terminal / no clipboard).');
+      }
+    } catch (err) {
+      composerSendBtn.disabled = false;
+      showToast(`Dispatch failed: ${err && err.message ? err.message : String(err)}`);
+    }
   }
 
   function onClickCapture(event) {

@@ -2589,5 +2589,19 @@
     }
   }
 
+  window.ezvibesInternals = {
+    getSessionWindowByPath(folderPath) {
+      if (!folderPath) return null;
+      const norm = String(folderPath).replace(/\\/g, '/').toLowerCase();
+      for (const [key, value] of state.windowsByPath.entries()) {
+        if (String(key).replace(/\\/g, '/').toLowerCase() === norm) return value;
+      }
+      return null;
+    },
+    getActiveTab(sessionWindow) {
+      return getActiveTab(sessionWindow);
+    },
+  };
+
   window.addEventListener('DOMContentLoaded', init);
 })();
