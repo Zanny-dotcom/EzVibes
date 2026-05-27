@@ -37,6 +37,7 @@ Core interaction:
 - `preload.js` — safe `contextBridge` API exposed as `window.ezvibes` (folder browsing, terminal IPC, clipboard, `webUtils.getPathForFile`).
 - `renderer/index.html` — app shell, narration-sidebar markup, script/style loading.
 - `renderer/app.js` — folder browser UI, context menu, session window + tab state, terminal popup lifecycle, narration sidebar logic. One IIFE, ~1200 lines.
+- `renderer/panel-mode.js` — panel-mode toggle: region registry, hover highlight overlay, click composer, dispatch into active EZvibes terminal tab (clipboard fallback). Pure renderer, no main-process / IPC additions; reaches into `app.js` via `window.ezvibesInternals` only to resolve the active tab.
 - `renderer/styles.css` — Explorer-like UI, folder visuals, orange minimized state, Genie-style animations, narration sidebar.
 - `scripts/postinstall.js` — patches/rebuilds `node-pty` for Windows/Electron.
 - `scripts/build-ezvibes-icon.ps1` — one-off PowerShell generator that draws a yellow folder + black "Z" via .NET System.Drawing and writes `renderer/ezvibes.ico` (PNG-in-ICO at 16/24/32/48/64/128/256 px).
@@ -185,6 +186,7 @@ This avoids fitting against 0x0/stale hidden hosts and prevents terminal edge or
 - Minimize/restore still operate on the whole session window; PTYs for every tab keep running while minimized, and the source folder card stays orange.
 - Launching for (or reopening) a folder that already has a session window restores that window and focuses its active tab rather than creating a new one.
 - Narration sidebar ("What Was Made") toggles open via the header button. It shows a per-folder activity log for any Claude session that has run in that folder, plus a session summary. Tab open/close events are folded into the same folder log.
+- The topbar `◫` button toggles Panel Mode: hover any major UI region to highlight it (folder cards, session windows, tab chips, terminal frame, etc.), click to open a small composer, type a request, hit Send. The renderer builds a structured payload (region name + selector + `file:line` + the user's text), wraps it in bracketed-paste markers, and writes it into the active live terminal tab for the EZvibes folder. If no live tab exists, the unwrapped payload is copied to the clipboard and a 2.5s toast surfaces inside the composer. Escape exits the mode (or closes the composer first). The selectable regions live in a curated registry in `renderer/panel-mode.js`; static regions are tagged with `data-panel-id` in `renderer/index.html`, dynamic ones in their builders in `renderer/app.js`.
 - System clipboard works in input fields via right-click (cut/copy/paste/select-all).
 
 ## Known Limitations / Next Improvements
@@ -201,6 +203,7 @@ This avoids fitting against 0x0/stale hidden hosts and prevents terminal edge or
 - No packaged build config yet.
 - Folder icons are CSS-drawn, not native Windows icons/thumbnails.
 - Orange minimized state exists only in memory.
+- Panel mode's EZvibes folder path is a hard-coded constant in `renderer/panel-mode.js` (`EZVIBES_FOLDER`). Moving the repo means editing one line.
 - If the selected folder is no longer visible after navigation, restore/minimize animation falls back to screen center.
 - First-time taskbar pin still requires the user to right-click the Start menu result and select "Pin to taskbar"; subsequent re-runs of `startup/Install-EzvibesShortcuts.ps1` keep the pin in sync.
 
