@@ -167,6 +167,27 @@
     openComposer(region);
   }
 
+  function onKeydown(event) {
+    if (!active) return;
+    if (event.key === 'Escape') {
+      if (frozenRegion) {
+        closeComposer();
+      } else {
+        setActive(false);
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }
+
+  function onContextMenu(event) {
+    if (!active) return;
+    if (event.target.closest('#panel-mode-composer')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    paintHighlight(null);
+  }
+
   function onMouseMove(event) {
     if (!active || frozenRegion) return;
     const el = document.elementFromPoint(event.clientX, event.clientY);
@@ -189,11 +210,17 @@
     if (active) {
       document.addEventListener('mousemove', onMouseMove, { capture: true });
       document.addEventListener('click', onClickCapture, { capture: true });
+      document.addEventListener('keydown', onKeydown, { capture: true });
+      document.addEventListener('contextmenu', onContextMenu, { capture: true });
     } else {
       document.removeEventListener('mousemove', onMouseMove, { capture: true });
       document.removeEventListener('click', onClickCapture, { capture: true });
+      document.removeEventListener('keydown', onKeydown, { capture: true });
+      document.removeEventListener('contextmenu', onContextMenu, { capture: true });
       closeComposer();
       paintHighlight(null);
+      const toggle = document.getElementById('panel-mode-toggle');
+      if (toggle) toggle.setAttribute('aria-pressed', 'false');
     }
     console.log('[panel-mode] active =', active);
   }
