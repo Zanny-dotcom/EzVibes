@@ -1232,3 +1232,94 @@ body.panel-mode-active main.shell * {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+#panel-mode-composer {
+  position: fixed;
+  z-index: 5001;
+  width: 360px;
+  max-width: calc(100vw - 24px);
+  background: #202423;
+  color: var(--fg);
+  border: 1px solid #3c4542;
+  border-radius: 6px;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.55);
+  padding: 12px 12px 10px 12px;
+  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#panel-mode-composer[hidden] {
+  display: none;
+}
+
+#panel-mode-composer .panel-mode-composer-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#panel-mode-composer .panel-mode-composer-name {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+#panel-mode-composer .panel-mode-composer-selector,
+#panel-mode-composer .panel-mode-composer-file {
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: #9ba6a3;
+}
+
+#panel-mode-composer .panel-mode-composer-describe {
+  color: #c3ccc9;
+  margin: 4px 0 0 0;
+  font-size: 12px;
+}
+
+#panel-mode-composer textarea {
+  resize: vertical;
+  min-height: 70px;
+  max-height: 220px;
+  background: #161a19;
+  color: var(--fg);
+  border: 1px solid #2c3331;
+  border-radius: 4px;
+  padding: 8px;
+  font: 12px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  outline: none;
+}
+
+#panel-mode-composer textarea:focus {
+  border-color: var(--accent);
+}
+
+#panel-mode-composer .panel-mode-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+#panel-mode-composer .panel-mode-composer-actions button {
+  background: #2c3331;
+  color: var(--fg);
+  border: 1px solid #3c4542;
+  border-radius: 4px;
+  padding: 5px 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+#panel-mode-composer .panel-mode-composer-actions button.primary {
+  background: var(--accent);
+  color: #0a0d0c;
+  border-color: var(--accent);
+}
+
+#panel-mode-composer .panel-mode-composer-toast {
+  background: #2c3331;
+  color: var(--fg);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 11px;
+}

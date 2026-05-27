@@ -77,8 +77,98 @@
     currentRegion = region;
   }
 
-  function onMouseMove(event) {
+  let composerEl = null;
+  let composerTextarea = null;
+  let composerToast = null;
+  let composerCancelBtn = null;
+  let composerSendBtn = null;
+  let frozenRegion = null;
+
+  function ensureComposer() {
+    if (composerEl) return composerEl;
+    composerEl = document.createElement('div');
+    composerEl.id = 'panel-mode-composer';
+    composerEl.hidden = true;
+    composerEl.innerHTML = `
+      <div class="panel-mode-composer-header">
+        <span class="panel-mode-composer-name"></span>
+        <code class="panel-mode-composer-selector"></code>
+        <span class="panel-mode-composer-file"></span>
+        <p class="panel-mode-composer-describe"></p>
+      </div>
+      <textarea class="panel-mode-composer-input" placeholder="Describe the change..."></textarea>
+      <div class="panel-mode-composer-toast" hidden></div>
+      <div class="panel-mode-composer-actions">
+        <button type="button" data-action="cancel">Cancel</button>
+        <button type="button" data-action="send" class="primary">Send</button>
+      </div>
+    `;
+    document.body.appendChild(composerEl);
+    composerTextarea = composerEl.querySelector('textarea');
+    composerToast = composerEl.querySelector('.panel-mode-composer-toast');
+    composerCancelBtn = composerEl.querySelector('[data-action="cancel"]');
+    composerSendBtn = composerEl.querySelector('[data-action="send"]');
+    composerCancelBtn.addEventListener('click', closeComposer);
+    return composerEl;
+  }
+
+  function positionComposer(anchorRect) {
+    ensureComposer();
+    const margin = 12;
+    const cw = composerEl.offsetWidth;
+    const ch = composerEl.offsetHeight;
+    let left = anchorRect.right + 8;
+    if (left + cw + margin > window.innerWidth) {
+      left = Math.max(margin, anchorRect.left - cw - 8);
+    }
+    if (left < margin) left = margin;
+    let top = anchorRect.top;
+    if (top + ch + margin > window.innerHeight) {
+      top = Math.max(margin, window.innerHeight - ch - margin);
+    }
+    composerEl.style.left = `${left}px`;
+    composerEl.style.top = `${top}px`;
+  }
+
+  function openComposer(region) {
+    ensureComposer();
+    frozenRegion = region;
+    paintHighlight(region);
+    composerEl.querySelector('.panel-mode-composer-name').textContent = region.meta.name;
+    composerEl.querySelector('.panel-mode-composer-selector').textContent =
+      `[data-panel-id="${region.id}"]`;
+    composerEl.querySelector('.panel-mode-composer-file').textContent =
+      `${region.meta.file}:${region.meta.line}`;
+    composerEl.querySelector('.panel-mode-composer-describe').textContent = region.meta.describe;
+    composerTextarea.value = '';
+    composerToast.hidden = true;
+    composerEl.hidden = false;
+    positionComposer(region.element.getBoundingClientRect());
+    composerTextarea.focus();
+  }
+
+  function closeComposer() {
+    if (!composerEl) return;
+    composerEl.hidden = true;
+    frozenRegion = null;
+    paintHighlight(null);
+  }
+
+  function onClickCapture(event) {
     if (!active) return;
+    if (event.target.closest('#panel-mode-toggle')) return;
+    if (event.target.closest('#panel-mode-composer')) return;
+    // Swallow app clicks while panel mode is selecting a region.
+    event.preventDefault();
+    event.stopPropagation();
+    if (frozenRegion) return;
+    const region = findRegion(event.target);
+    if (!region) return;
+    openComposer(region);
+  }
+
+  function onMouseMove(event) {
+    if (!active || frozenRegion) return;
     const el = document.elementFromPoint(event.clientX, event.clientY);
     const region = findRegion(el);
     if (!region) {
@@ -98,8 +188,11 @@
     document.body.classList.toggle('panel-mode-active', active);
     if (active) {
       document.addEventListener('mousemove', onMouseMove, { capture: true });
+      document.addEventListener('click', onClickCapture, { capture: true });
     } else {
       document.removeEventListener('mousemove', onMouseMove, { capture: true });
+      document.removeEventListener('click', onClickCapture, { capture: true });
+      closeComposer();
       paintHighlight(null);
     }
     console.log('[panel-mode] active =', active);
