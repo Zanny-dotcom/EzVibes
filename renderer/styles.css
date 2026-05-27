@@ -1202,3 +1202,33 @@ body.panel-mode-active main.shell,
 body.panel-mode-active main.shell * {
   cursor: crosshair !important;
 }
+
+#panel-mode-highlight {
+  position: fixed;
+  pointer-events: none;
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 4px 18px rgba(85, 182, 255, 0.25);
+  z-index: 5000;
+  transition: top 60ms ease, left 60ms ease, width 60ms ease, height 60ms ease, opacity 80ms ease;
+  opacity: 0;
+}
+
+#panel-mode-highlight.visible {
+  opacity: 1;
+}
+
+#panel-mode-highlight .panel-mode-chip {
+  position: absolute;
+  top: -22px;
+  left: -2px;
+  background: var(--accent);
+  color: #0a0d0c;
+  font: 11px/16px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 2px 6px;
+  border-radius: 3px 3px 0 0;
+  white-space: nowrap;
+  max-width: 80vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

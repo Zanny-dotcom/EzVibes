@@ -45,6 +45,50 @@
     return { id, element: el, meta };
   }
 
+  let highlightEl = null;
+  let chipEl = null;
+  let currentRegion = null;
+
+  function ensureHighlight() {
+    if (highlightEl) return highlightEl;
+    highlightEl = document.createElement('div');
+    highlightEl.id = 'panel-mode-highlight';
+    chipEl = document.createElement('span');
+    chipEl.className = 'panel-mode-chip';
+    highlightEl.appendChild(chipEl);
+    document.body.appendChild(highlightEl);
+    return highlightEl;
+  }
+
+  function paintHighlight(region) {
+    ensureHighlight();
+    if (!region) {
+      highlightEl.classList.remove('visible');
+      currentRegion = null;
+      return;
+    }
+    const rect = region.element.getBoundingClientRect();
+    highlightEl.style.top = `${rect.top}px`;
+    highlightEl.style.left = `${rect.left}px`;
+    highlightEl.style.width = `${rect.width}px`;
+    highlightEl.style.height = `${rect.height}px`;
+    chipEl.textContent = region.meta.name;
+    highlightEl.classList.add('visible');
+    currentRegion = region;
+  }
+
+  function onMouseMove(event) {
+    if (!active) return;
+    const el = document.elementFromPoint(event.clientX, event.clientY);
+    const region = findRegion(el);
+    if (!region) {
+      paintHighlight(null);
+      return;
+    }
+    if (currentRegion && currentRegion.element === region.element) return;
+    paintHighlight(region);
+  }
+
   let active = false;
 
   function setActive(next) {
@@ -52,6 +96,12 @@
     if (value === active) return;
     active = value;
     document.body.classList.toggle('panel-mode-active', active);
+    if (active) {
+      document.addEventListener('mousemove', onMouseMove, { capture: true });
+    } else {
+      document.removeEventListener('mousemove', onMouseMove, { capture: true });
+      paintHighlight(null);
+    }
     console.log('[panel-mode] active =', active);
   }
 
