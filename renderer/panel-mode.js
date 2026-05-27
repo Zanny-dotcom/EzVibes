@@ -5,6 +5,7 @@
     const value = !!next;
     if (value === active) return;
     active = value;
+    document.body.classList.toggle('panel-mode-active', active);
     console.log('[panel-mode] active =', active);
   }
 

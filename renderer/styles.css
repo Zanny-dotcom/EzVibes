@@ -1181,3 +1181,24 @@ button {
     display: none;
   }
 }
+
+/* Panel Mode */
+.panel-mode-toggle[aria-pressed="true"] {
+  background: var(--panel-2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+body.panel-mode-active {
+  cursor: crosshair;
+}
+
+body.panel-mode-active main.shell {
+  filter: brightness(0.85);
+  transition: filter 120ms ease;
+}
+
+body.panel-mode-active main.shell,
+body.panel-mode-active main.shell * {
+  cursor: crosshair !important;
+}
