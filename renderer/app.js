@@ -35,6 +35,7 @@
     els.newSessionBtn = document.getElementById('new-session-btn');
     els.shell = document.querySelector('main.shell');
     els.narrationToggle = document.getElementById('narration-toggle');
+    els.panelModeToggle = document.getElementById('panel-mode-toggle');
     els.narrationSidebar = document.getElementById('narration-sidebar');
     els.narrationClose = document.getElementById('narration-close');
     els.narrationFolder = document.getElementById('narration-folder');
@@ -90,6 +91,13 @@
       renderNarrationSidebar();
     });
     els.liveLogToggle.addEventListener('click', () => setLiveLogOpen(!state.liveLogOpen));
+    els.panelModeToggle.addEventListener('click', () => {
+      const panel = window.ezvibesPanelMode;
+      if (!panel) return;
+      const next = !panel.isActive();
+      panel.setActive(next);
+      els.panelModeToggle.setAttribute('aria-pressed', next ? 'true' : 'false');
+    });
     els.liveLogClose.addEventListener('click', () => setLiveLogOpen(false));
     els.grid.addEventListener('click', (event) => {
       if (event.target !== els.grid) return;
