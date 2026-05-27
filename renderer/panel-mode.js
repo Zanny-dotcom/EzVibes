@@ -1,4 +1,50 @@
 (function () {
+  const PANEL_REGIONS = new Map([
+    // Static regions (tagged in renderer/index.html)
+    ['topbar', { name: 'Top bar', file: 'renderer/index.html', line: '16-29', describe: 'Header strip: brand label, nav buttons, path bar, search input, narration / panel-mode / log toggles.' }],
+    ['window-title', { name: 'Window title', file: 'renderer/index.html', line: '17', describe: 'The EZvibes brand label at top-left of the header.' }],
+    ['nav-buttons-group', { name: 'Nav buttons group', file: 'renderer/index.html', line: '18-22', describe: 'Container for the back / up / refresh icon buttons.' }],
+    ['back-btn', { name: 'Back button', file: 'renderer/index.html', line: '19', describe: 'The back button; navigates back in folder history.' }],
+    ['up-btn', { name: 'Up button', file: 'renderer/index.html', line: '20', describe: 'The up button; navigates to the parent folder.' }],
+    ['refresh-btn', { name: 'Refresh button', file: 'renderer/index.html', line: '21', describe: 'The refresh button; re-reads the current folder.' }],
+    ['path-bar', { name: 'Path bar', file: 'renderer/index.html', line: '23', describe: 'Displays the current folder path.' }],
+    ['search-input', { name: 'Search input', file: 'renderer/index.html', line: '25', describe: 'Search box that filters visible folder/file entries.' }],
+    ['narration-toggle', { name: 'Narration toggle', file: 'renderer/index.html', line: '27', describe: 'The narration button; opens the "What Was Made" sidebar.' }],
+    ['panel-mode-toggle', { name: 'Panel-mode toggle', file: 'renderer/index.html', line: '28', describe: 'The panel mode button; toggles this feature.' }],
+    ['live-log-toggle', { name: 'Live-log toggle', file: 'renderer/index.html', line: '29', describe: 'The LOG button; opens the live diagnostics drawer.' }],
+    ['sidebar', { name: 'Sidebar', file: 'renderer/index.html', line: '32-38', describe: 'Left rail: ACTIVE SESSIONS link plus the Places quick-paths.' }],
+    ['active-sessions-btn', { name: 'Active sessions link', file: 'renderer/index.html', line: '33-35', describe: 'The green ACTIVE SESSIONS link at the top of the sidebar.' }],
+    ['quick-paths-list', { name: 'Places list', file: 'renderer/index.html', line: '37', describe: 'Dynamic quick-paths under Places (Home, Desktop, Documents, and others).' }],
+    ['content', { name: 'Content area', file: 'renderer/index.html', line: '40-46', describe: 'Center pane containing the command bar and the folder grid.' }],
+    ['command-bar', { name: 'Command bar', file: 'renderer/index.html', line: '41-44', describe: 'Strip above the folder grid: Launch Claude Here button plus item count.' }],
+    ['new-session-btn', { name: 'Launch Claude Here button', file: 'renderer/index.html', line: '42', describe: 'Button that starts a Claude session in the current folder.' }],
+    ['folder-count', { name: 'Folder count', file: 'renderer/index.html', line: '43', describe: 'Text showing the number of items in the current folder.' }],
+    ['folder-grid', { name: 'Folder grid', file: 'renderer/index.html', line: '45', describe: 'Grid of folder/file cards in the current directory.' }],
+    ['narration-sidebar', { name: 'Narration sidebar', file: 'renderer/index.html', line: '48-57', describe: 'Right-side "What Was Made" panel; visible when narration toggle is on.' }],
+    ['live-log-panel', { name: 'Live-log drawer', file: 'renderer/index.html', line: '59-68', describe: 'Fixed drawer that shows recent diagnostic events; opened by the LOG button.' }],
+
+    // Dynamic regions (tagged in renderer/app.js)
+    ['folder-card', { name: 'Folder card', file: 'renderer/app.js', line: '~595', describe: 'A single folder/file card in the grid, built per entry by renderGrid().' }],
+    ['session-window', { name: 'Session window', file: 'renderer/app.js', line: '~1184', describe: 'The yellow folder-shaped popup hosting a Claude/Codex terminal.' }],
+    ['session-window-tab-strip', { name: 'Session window tab strip', file: 'renderer/app.js', line: '~1187', describe: 'Chrome-style strip overhanging the top edge: tab chips plus the + button.' }],
+    ['session-window-header', { name: 'Session window header', file: 'renderer/app.js', line: '~1188', describe: 'Yellow strip flush with the top of the popup: folder-name label plus minimize/close controls.' }],
+    ['session-window-tab-chip', { name: 'Session tab chip', file: 'renderer/app.js', line: '~1288', describe: 'One tab in a session window (CLAUDE, CODEX, custom name).' }],
+    ['session-window-add-tab', { name: 'Session "new tab" button', file: 'renderer/app.js', line: '~1206', describe: 'The + button at the right end of the tab strip; left-click adds Claude, right-click adds Codex.' }],
+    ['session-window-folder-name-label', { name: 'Session window folder label', file: 'renderer/app.js', line: '~1189', describe: 'The small folder-name chip on the yellow header strip.' }],
+    ['session-window-controls', { name: 'Session window controls', file: 'renderer/app.js', line: '~1190', describe: 'The minimize/close buttons on the session window header.' }],
+    ['terminal-pocket', { name: 'Terminal pocket', file: 'renderer/app.js', line: '~1196', describe: 'The dark frame inside a session window that surrounds the xterm terminal.' }],
+  ]);
+
+  function findRegion(target) {
+    if (!target || typeof target.closest !== 'function') return null;
+    const el = target.closest('[data-panel-id]');
+    if (!el) return null;
+    const id = el.dataset.panelId;
+    const meta = PANEL_REGIONS.get(id);
+    if (!meta) return null;
+    return { id, element: el, meta };
+  }
+
   let active = false;
 
   function setActive(next) {
@@ -13,5 +59,5 @@
     return active;
   }
 
-  window.ezvibesPanelMode = { setActive, isActive };
+  window.ezvibesPanelMode = { setActive, isActive, _test: { findRegion, PANEL_REGIONS } };
 })();
