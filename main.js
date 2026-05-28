@@ -5,6 +5,7 @@ const os = require('os');
 const { pathToFileURL } = require('url');
 const { spawn } = require('child_process');
 const pty = require('node-pty');
+const { isImmediateChildOf, liveSessionAtOrUnder } = require('./lib/path-safety');
 
 const projectRoot = __dirname;
 const ACTIVATE_DIR_PATH = path.join(projectRoot, 'activate');
@@ -734,10 +735,18 @@ async function deleteFolder(payload) {
   if (!payload || typeof payload.path !== 'string' || !payload.path.trim()) {
     throw new Error('Folder path is required.');
   }
+  const parentDir = assertDirectory(payload.parentPath);
   const target = path.resolve(payload.path);
+  if (!isImmediateChildOf(parentDir, target)) {
+    throw new Error('Folder to delete is outside the declared parent directory.');
+  }
   const stat = fs.statSync(target);
   if (!stat.isDirectory()) {
     throw new Error('Only folders can be deleted from EZvibes.');
+  }
+  const blockingSession = liveSessionAtOrUnder(target, payload.liveSessionPaths);
+  if (blockingSession) {
+    throw new Error('A live session is running in this folder or a subfolder. Close it before deleting.');
   }
   await shell.trashItem(target);
   const result = {

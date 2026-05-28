@@ -633,10 +633,22 @@
     renderGrid();
   }
 
+  function sessionRunningAtOrUnder(folderPath) {
+    if (!folderPath) return false;
+    const norm = (p) => String(p).replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+    const target = norm(folderPath);
+    const prefix = target + '\\';
+    for (const key of state.windowsByPath.keys()) {
+      const k = norm(key);
+      if (k === target || k.startsWith(prefix)) return true;
+    }
+    return false;
+  }
+
   async function deleteFolderWithConfirm(entry, sourceCard) {
     if (!entry || !api.deleteFolder) return;
-    if (state.windowsByPath.get(entry.path)) {
-      showInboxToast('Close the session for this folder before deleting it.', 'error');
+    if (sessionRunningAtOrUnder(entry.path)) {
+      showInboxToast('Close the session in this folder (or a subfolder) before deleting it.', 'error');
       return;
     }
     const confirmed = await confirmDestructiveClose({
@@ -649,7 +661,11 @@
     });
     if (!confirmed) return;
     try {
-      const result = await api.deleteFolder({ path: entry.path });
+      const result = await api.deleteFolder({
+        path: entry.path,
+        parentPath: state.currentPath,
+        liveSessionPaths: Array.from(state.windowsByPath.keys()),
+      });
       if (!result || !result.success) {
         throw new Error((result && result.error) || 'Could not delete folder.');
       }
