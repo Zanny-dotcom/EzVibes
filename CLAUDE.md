@@ -25,7 +25,8 @@ Core interaction:
 ## Stack
 
 - Electron 42
-- Vanilla JavaScript, HTML, CSS (no React, TypeScript, bundler, or tests)
+- Vanilla JavaScript, HTML, CSS (no React, TypeScript, or bundler)
+- Node's built-in test runner (`node --test`, via `npm test`) for pure-logic unit tests — no external test framework
 - `node-pty@1.1.0` for real interactive terminal sessions
 - `@xterm/xterm@5.5.0` for terminal rendering
 - `@xterm/addon-fit@0.10.0` for terminal sizing
@@ -34,6 +35,7 @@ Core interaction:
 
 - `package.json` — app scripts and dependencies.
 - `main.js` — Electron main process, directory listing IPC, PTY session lifecycle, system clipboard IPC, suppressed default menu.
+- `lib/path-safety.js` — pure, Electron-free path guards (`isPathInside`, `isImmediateChildOf`, `liveSessionAtOrUnder`) used by `main.js` to confine folder operations. Unit-tested.
 - `preload.js` — safe `contextBridge` API exposed as `window.ezvibes` (folder browsing, terminal IPC, clipboard, `webUtils.getPathForFile`).
 - `renderer/index.html` — app shell, narration-sidebar markup, script/style loading.
 - `renderer/app.js` — folder browser UI, context menu, session window + tab state, terminal popup lifecycle, narration sidebar logic. One IIFE, ~1200 lines.
@@ -47,12 +49,19 @@ Core interaction:
 - `docs/superpowers/specs/` — approved feature designs.
 - `docs/superpowers/plans/` — in-flight feature plans.
 - `tab-plan.md` — design + step-by-step implementation outline for Chrome-style tabs per session window. **Implemented; retained for reference.**
+- `test/` — `node --test` unit suites (currently `test/path-safety.test.js`, covering the folder-operation path guards in `lib/path-safety.js`).
 
 ## Launch
 
 ```powershell
 cd C:\Users\Oskari\Documents\EZvibes
 npm start
+```
+
+Run the unit tests:
+
+```powershell
+npm test
 ```
 
 Install/rebuild:
@@ -123,6 +132,8 @@ Minimized session windows keep all their tab PTYs running. Closing a tab kills t
 
 The default Electron application menu is suppressed (`Menu.setApplicationMenu(null)`).
 
+`fs:delete-folder` payload is `{ path, parentPath, liveSessionPaths }`. `main.js` confirms the target is an immediate child of `parentPath` (the `isPathInside` guard from `lib/path-safety.js`, matching `createFolder`/`renameFolder`) and refuses to trash a folder that has a live session at or under it. These checks are authoritative in main; the renderer mirrors them for a friendlier toast.
+
 ## Operational Diagnostics
 
 EZvibes has a live diagnostics log for app lifecycle and terminal session events. The top bar `LOG` button opens an in-app Live Log drawer. The drawer shows the most recent in-memory events and the current disk log path.
@@ -176,7 +187,7 @@ This avoids fitting against 0x0/stale hidden hosts and prevents terminal edge or
 - Sidebar has quick links for Home, Desktop, Documents, Downloads, and EZvibes when present.
 - Search filters visible folder/file entries.
 - Double-clicking a normal folder navigates into it.
-- Right-clicking a folder opens actions: `Open Folder`, `Launch Claude`, session minimize/restore/close when a session window exists, `Rename` (inline edit on the card), and `Delete` (red, sends the folder to the Windows Recycle Bin). Both `Rename` and `Delete` are disabled with a "Close the session first." tooltip whenever the folder has a live session attached, since both would invalidate a running PTY's cwd.
+- Right-clicking a folder opens actions: `Open Folder`, `Launch Claude`, session minimize/restore/close when a session window exists, `Rename` (inline edit on the card), and `Delete` (red, sends the folder to the Windows Recycle Bin). Both `Rename` and `Delete` are disabled with a "Close the session first." tooltip whenever the folder has a live session attached, since both would invalidate a running PTY's cwd. `Delete` additionally refuses (with a toast) when a live session runs in the folder *or any subfolder*, and `main.js` confines every deletion to the currently-browsed parent directory.
 - Right-clicking a file has no real actions yet.
 - `Launch Claude Here` launches a Claude session window for the current directory.
 - Session windows show a Chrome-style tab strip at the top. Each tab is an independent PTY running in the window's folder; today the agent is either `claude --dangerously-skip-permissions` or `codex --yolo`.
@@ -203,7 +214,7 @@ This avoids fitting against 0x0/stale hidden hosts and prevents terminal edge or
 - No watcher yet, so folder contents do not live-refresh.
 - No breadcrumb segments yet, only a path bar.
 - No multi-window support.
-- No tests yet.
+- Unit tests cover the pure folder-operation path guards (`lib/path-safety.js`); no renderer/IPC integration test harness yet (Vitest + jsdom is the planned next step).
 - No packaged build config yet.
 - Folder icons are CSS-drawn, not native Windows icons/thumbnails.
 - Orange minimized state exists only in memory.
@@ -221,3 +232,5 @@ This avoids fitting against 0x0/stale hidden hosts and prevents terminal edge or
 - `claude --dangerously-skip-permissions` is intentionally powerful. Any future UI that broadens launch behavior should make the target folder and command explicit.
 - The `agent` field in the `terminal:create` IPC payload is currently a two-value enum (`'claude'` | `'codex'`); `main.js` defaults unknown values to `'claude'`. Adding a third agent means updating `AGENT_COMMANDS` in `main.js` **and** the `agent === 'codex' ? ... : ...` ternaries in `renderer/app.js` (`buildTab`, `createTab`, `attachTabChip`, `defaultTabLabel`, and the exit handler). If a third agent is on the roadmap, normalize those into a single `KNOWN_AGENTS` set in one place.
 - `node-pty` rebuilds are fragile on Windows. If install fails, check `scripts/postinstall.js` and generated Visual Studio project files for Spectre-mitigation settings.
+- `launchClaudeForPath` and `createTab` spawn the PTY and attach the `ResizeObserver` *after* awaiting the open animation and PTY creation. Keep the `isTabStillAttached()` re-checks after those awaits — without them, closing a window mid-open leaks an observer on a detached pocket and orphans an unkillable PTY.
+- Folder-operation safety lives in `main.js` (the renderer is not a trust boundary): `deleteFolder` enforces parent-confinement and the live-session guard server-side. Keep new `fs:*` handlers validating in main, not only in the renderer.
