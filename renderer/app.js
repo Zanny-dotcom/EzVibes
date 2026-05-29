@@ -1715,6 +1715,21 @@
     }
   }
 
+  // Re-check after an `await`: is this tab still attached and its window still open?
+  // launchClaudeForPath/createTab await the open animation + PTY spawn; if the user
+  // closes the window or tab during those awaits we must not attach a ResizeObserver
+  // to a detached pocket or leave a freshly-spawned PTY orphaned.
+  function isTabStillAttached(sessionWindow, tab) {
+    return (
+      !!tab &&
+      !tab._closing &&
+      !!sessionWindow &&
+      !sessionWindow._closing &&
+      state.tabsById.get(tab.id) === tab &&
+      sessionWindow.tabs.indexOf(tab) !== -1
+    );
+  }
+
   async function launchClaudeForPath(folderPath, sourceCard) {
     const existing = state.windowsByPath.get(folderPath);
     if (existing) {
@@ -1733,6 +1748,7 @@
     tab.term.open(tab.terminalEl);
     tab.term.onData((data) => handleTerminalInput(tab, data));
     await terminalBecameVisible(tab, { focus: true, waitForAnimation: true, reason: 'launch' });
+    if (!isTabStillAttached(sessionWindow, tab)) return; // window closed during the open animation
     observeSessionSize(sessionWindow);
 
     let result;
@@ -1746,6 +1762,12 @@
       });
     } catch (error) {
       result = { success: false, error: (error && error.message) || String(error) };
+    }
+
+    if (!isTabStillAttached(sessionWindow, tab)) {
+      // The window/tab was torn down while the PTY spawned — kill the orphan.
+      if (result && result.success) { try { await api.closeTerminal(tab.id); } catch {} }
+      return;
     }
 
     if (!result || !result.success) {
@@ -2648,6 +2670,7 @@
     // Activate it so this tab becomes visible and fits properly.
     activateTab(sessionWindow, tab.id, { focus: true, skipVisibleRepair: true });
     await terminalBecameVisible(tab, { focus: true, scrollToBottom: true, reason: 'new-tab' });
+    if (!isTabStillAttached(sessionWindow, tab)) return null; // tab/window closed during reveal
 
     addNarrationEvent(sessionWindow.folderPath, 'tab-created', `Created ${agentLabel} tab ${getTabLabel(tab)} in ${basename(sessionWindow.folderPath)}.`);
 
@@ -2662,6 +2685,12 @@
       });
     } catch (error) {
       result = { success: false, error: (error && error.message) || String(error) };
+    }
+
+    if (!isTabStillAttached(sessionWindow, tab)) {
+      // The window/tab was torn down while the PTY spawned — kill the orphan.
+      if (result && result.success) { try { await api.closeTerminal(tab.id); } catch {} }
+      return null;
     }
 
     if (!result || !result.success) {
