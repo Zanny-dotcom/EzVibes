@@ -1,0 +1,25 @@
+{
+  "name": "ezvibes-marketing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "EZvibes 120s marketing video (landscape + vertical/TikTok)",
+  "scripts": {
+    "start": "remotion studio",
+    "build": "remotion render EZvibesMain out/ezvibes-main.mp4",
+    "build:shorts": "remotion render EZvibesShorts out/ezvibes-shorts.mp4",
+    "build:all": "npm run build && npm run build:shorts",
+    "upgrade": "remotion upgrade"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.468",
+    "@remotion/google-fonts": "4.0.468",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.468"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "@types/web": "0.0.184",
+    "typescript": "5.6.3"
+  }
+}
